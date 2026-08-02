@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Vima
+Comment=Search for and launch applications
+Exec=vima
+Icon=system-run
+Terminal=false
+Categories=Utility;
+Keywords=launcher;applications;search;
+StartupNotify=true

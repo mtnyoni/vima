@@ -45,6 +45,9 @@ esac
 
 odin build "$project_dir" \
 	"-out:$output_dir/vima" \
+	-no-rpath \
+	-reloc-mode:pic \
+	'-extra-linker-flags:-pie' \
 	"${build_flags[@]}"
 
 echo "built $output_dir/vima"
