@@ -1,8 +1,11 @@
 param(
     [ValidateSet("Release", "Debug")]
     [string]$Mode = "Release",
+    [ValidatePattern("^[0-9]+(\.[0-9]+)*$")]
+    [string]$Version = "0.1.0",
     [string]$SDL3Root = $env:SDL3_DIR,
-    [string]$SDL3TtfRoot = $env:SDL3_TTF_DIR
+    [string]$SDL3TtfRoot = $env:SDL3_TTF_DIR,
+    [switch]$PortableOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +37,31 @@ function Find-DependencyFile {
         throw "Could not find $Name below $Root."
     }
     return $file
+}
+
+function Find-InnoCompiler {
+    $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $searchRoots = @(
+        ${env:ProgramFiles(x86)},
+        $env:ProgramFiles,
+        (Join-Path $env:LOCALAPPDATA "Programs")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($root in $searchRoots) {
+        $compiler = Get-ChildItem -Path $root -Filter "ISCC.exe" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "Inno Setup" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($compiler) {
+            return $compiler.FullName
+        }
+    }
+
+    return $null
 }
 
 $SDL3Lib = Find-DependencyFile -Root $SDL3Root -Name "SDL3.lib"
@@ -76,3 +104,25 @@ if ($LASTEXITCODE -ne 0) {
     }
 
 Write-Host "Built $Output"
+
+if (-not $PortableOnly) {
+    $InnoCompiler = Find-InnoCompiler
+    if (-not $InnoCompiler) {
+        throw "Inno Setup was not found. Install it with: winget install --id JRSoftware.InnoSetup -e -s winget -i"
+    }
+
+    $InstallerDir = Join-Path $ProjectDir "build\installer"
+    $InstallerScript = Join-Path $ProjectDir "packaging\windows\vima.iss"
+    New-Item -ItemType Directory -Path $InstallerDir -Force | Out-Null
+
+    & $InnoCompiler "/DMyAppVersion=$Version" "/O$InstallerDir" $InstallerScript
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    $Installer = Join-Path $InstallerDir "Vima-$Version-Setup.exe"
+    if (-not (Test-Path $Installer)) {
+        throw "Inno Setup completed without producing $Installer."
+    }
+    Write-Host "Built $Installer"
+}
