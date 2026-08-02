@@ -17,6 +17,9 @@ WINDOW_SHADOW_PADDING: i32 = 12
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 18
+LIST_ROW_HEIGHT: f32 = 44
+LIST_NAME_FONT_SIZE: f32 = 15
+LIST_DESCRIPTION_FONT_SIZE: f32 = 12
 
 CARET_HEIGHT_RATIO: f32 = 0.75
 CARET_BLINK_INTERVAL: u64 = 500
@@ -34,6 +37,9 @@ app_color: Color = Color{35, 38, 52, 255} // Frappé Crust: #232634
 input_border_color: Color = Color{81, 87, 109, 255} // Frappé Surface 1: #51576d
 window_border_color: Color = Color{98, 104, 128, 255} // Frappé Surface 2: #626880
 text_color: Color = Color{198, 208, 245, 255} // Frappé Text: #c6d0f5
+subtext_color: Color = Color{165, 173, 206, 255} // Frappé Subtext 0: #a5adce
+selected_color: Color = Color{65, 69, 89, 255} // Frappé Surface 0: #414559
+separator_color: Color = Color{41, 44, 60, 255} // Frappé Mantle: #292c3c
 shadow_color: Color = Color{35, 38, 52, 90} // Frappé Crust with soft alpha
 
 Caret_State :: struct {
@@ -74,6 +80,23 @@ render_caret :: proc(
 	}
 	sdl.SetRenderDrawColor(renderer, text_color.r, text_color.g, text_color.b, text_color.a)
 	sdl.RenderFillRect(renderer, &caret)
+}
+
+create_text :: proc(
+	engine: ^ttf.TextEngine,
+	font: ^ttf.Font,
+	value: cstring,
+	color: Color,
+) -> ^ttf.Text {
+	text := ttf.CreateText(engine, font, value, c.size_t(len(string(value))))
+	if text == nil {
+		return nil
+	}
+	if !ttf.SetTextColor(text, color.r, color.g, color.b, color.a) {
+		ttf.DestroyText(text)
+		return nil
+	}
+	return text
 }
 
 inside_rounded_rect :: proc(x, y, width, height, radius: i32) -> bool {
@@ -184,8 +207,8 @@ window_backdrop_surface :: proc(
 	content_width, content_height, padding, radius: i32,
 	background, shadow: Color,
 ) -> ^sdl.Surface {
-	width := content_width+padding*2
-	height := content_height+padding*2
+	width := content_width + padding * 2
+	height := content_height + padding * 2
 	surface := sdl.CreateSurface(width, height, .RGBA8888)
 	if surface == nil {
 		return nil
@@ -195,8 +218,8 @@ window_backdrop_surface :: proc(
 		for x in 0 ..< width {
 			r, g, b, a: u8
 			if inside_rounded_rect(
-				x-padding,
-				y-padding,
+				x - padding,
+				y - padding,
 				content_width,
 				content_height,
 				radius,
@@ -204,15 +227,15 @@ window_backdrop_surface :: proc(
 				r, g, b, a = background.r, background.g, background.b, background.a
 			} else {
 				r, g, b, a = shadow.r, shadow.g, shadow.b, 0
-				for distance in 1 ..< padding+1 {
+				for distance in 1 ..< padding + 1 {
 					if inside_rounded_rect(
-						x-(padding-distance),
-						y-(padding-distance),
-						content_width+distance*2,
-						content_height+distance*2,
-						radius+distance,
+						x - (padding - distance),
+						y - (padding - distance),
+						content_width + distance * 2,
+						content_height + distance * 2,
+						radius + distance,
 					) {
-						a = u8((padding-distance+1)*i32(shadow.a)/padding)
+						a = u8((padding - distance + 1) * i32(shadow.a) / padding)
 						break
 					}
 				}
@@ -249,8 +272,8 @@ main_window :: proc(title: cstring) {
 	assert(ttf.Init())
 	defer ttf.Quit()
 
-	window_width := WINDOW_WIDTH+WINDOW_SHADOW_PADDING*2
-	window_height := WINDOW_HEIGHT+WINDOW_SHADOW_PADDING*2
+	window_width := WINDOW_WIDTH + WINDOW_SHADOW_PADDING * 2
+	window_height := WINDOW_HEIGHT + WINDOW_SHADOW_PADDING * 2
 	window := sdl.CreateWindow(
 		title,
 		window_width,
@@ -278,12 +301,12 @@ main_window :: proc(title: cstring) {
 
 	render_width, render_height: i32
 	assert(sdl.GetCurrentRenderOutputSize(renderer, &render_width, &render_height))
-	render_scale_x := f32(render_width)/f32(window_width)
-	render_scale_y := f32(render_height)/f32(window_height)
-	shadow_padding_x := f32(WINDOW_SHADOW_PADDING)*render_scale_x
-	shadow_padding_y := f32(WINDOW_SHADOW_PADDING)*render_scale_y
-	content_width := render_width-i32(shadow_padding_x)*2
-	content_height := render_height-i32(shadow_padding_y)*2
+	render_scale_x := f32(render_width) / f32(window_width)
+	render_scale_y := f32(render_height) / f32(window_height)
+	shadow_padding_x := f32(WINDOW_SHADOW_PADDING) * render_scale_x
+	shadow_padding_y := f32(WINDOW_SHADOW_PADDING) * render_scale_y
+	content_width := render_width - i32(shadow_padding_x) * 2
+	content_height := render_height - i32(shadow_padding_y) * 2
 	content_rect := sdl.FRect {
 		x = shadow_padding_x,
 		y = shadow_padding_y,
@@ -295,7 +318,7 @@ main_window :: proc(title: cstring) {
 		content_width,
 		content_height,
 		i32(shadow_padding_x),
-		i32(f32(WINDOW_RADIUS)*render_scale_y),
+		i32(f32(WINDOW_RADIUS) * render_scale_y),
 		app_color,
 		shadow_color,
 	)
@@ -312,6 +335,18 @@ main_window :: proc(title: cstring) {
 	assert(font != nil)
 	defer ttf.CloseFont(font)
 	font_height := ttf.GetFontHeight(font)
+	list_name_font := ttf.OpenFont(
+		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+		LIST_NAME_FONT_SIZE*render_scale_y,
+	)
+	assert(list_name_font != nil)
+	defer ttf.CloseFont(list_name_font)
+	list_description_font := ttf.OpenFont(
+		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+		LIST_DESCRIPTION_FONT_SIZE*render_scale_y,
+	)
+	assert(list_description_font != nil)
+	defer ttf.CloseFont(list_description_font)
 
 	text_engine := ttf.CreateRendererTextEngine(renderer)
 	assert(text_engine != nil)
@@ -321,6 +356,33 @@ main_window :: proc(title: cstring) {
 	assert(input_text != nil)
 	defer ttf.DestroyText(input_text)
 	assert(ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a))
+
+	application_name_texts: [len(DUMMY_APPLICATIONS)]^ttf.Text
+	application_description_texts: [len(DUMMY_APPLICATIONS)]^ttf.Text
+	for application, index in DUMMY_APPLICATIONS {
+		application_name_texts[index] = create_text(
+			text_engine,
+			list_name_font,
+			application.name,
+			text_color,
+		)
+		assert(application_name_texts[index] != nil)
+		application_description_texts[index] = create_text(
+			text_engine,
+			list_description_font,
+			application.description,
+			subtext_color,
+		)
+		assert(application_description_texts[index] != nil)
+	}
+	defer {
+		for text in application_name_texts {
+			ttf.DestroyText(text)
+		}
+		for text in application_description_texts {
+			ttf.DestroyText(text)
+		}
+	}
 
 	border_surface := rounded_window_border(
 		content_width,
@@ -335,9 +397,9 @@ main_window :: proc(title: cstring) {
 	assert(border_texture != nil)
 	defer sdl.DestroyTexture(border_texture)
 
-	input_x := shadow_padding_x+4*render_scale_x
-	input_y := shadow_padding_y+4*render_scale_y
-	input_width := f32(content_width)-8*render_scale_x
+	input_x := shadow_padding_x + 4 * render_scale_x
+	input_y := shadow_padding_y + 4 * render_scale_y
+	input_width := f32(content_width) - 8 * render_scale_x
 	input_height := INPUT_HEIGHT * render_scale_y
 	input_surface := rounded_input_surface(
 		i32(input_width),
@@ -359,6 +421,18 @@ main_window :: proc(title: cstring) {
 		w = input_width,
 		h = input_height,
 	}
+	list_x := input_x
+	list_y := input_y+input_height+4*render_scale_y
+	list_width := input_width
+	list_height := shadow_padding_y+f32(content_height)-4*render_scale_y-list_y
+	row_height := LIST_ROW_HEIGHT*render_scale_y
+	visible_row_count := max(1, int(list_height/row_height))
+	list_clip := sdl.Rect {
+		x = i32(list_x),
+		y = i32(list_y),
+		w = i32(list_width),
+		h = i32(list_height),
+	}
 
 	input: strings.Builder
 	strings.builder_init(&input, 0, 256)
@@ -369,6 +443,8 @@ main_window :: proc(title: cstring) {
 
 	input_dirty := true
 	caret_state: Caret_State
+	selected_index := 0
+	scroll_offset := 0
 	running := true
 	for running {
 		e: sdl.Event
@@ -378,6 +454,17 @@ main_window :: proc(title: cstring) {
 			case .KEY_DOWN:
 				if e.key.scancode == .ESCAPE {
 					running = false
+				} else if e.key.scancode == .UP {
+					selected_index = max(0, selected_index-1)
+				} else if e.key.scancode == .DOWN {
+					selected_index = min(len(DUMMY_APPLICATIONS)-1, selected_index+1)
+				} else if e.key.scancode == .PAGEUP {
+					selected_index = max(0, selected_index-visible_row_count)
+				} else if e.key.scancode == .PAGEDOWN {
+					selected_index = min(
+						len(DUMMY_APPLICATIONS)-1,
+						selected_index+visible_row_count,
+					)
 				} else if e.key.scancode == .BACKSPACE {
 					_, _ = strings.pop_rune(&input)
 					input_dirty = true
@@ -391,10 +478,25 @@ main_window :: proc(title: cstring) {
 				caret_state.last_input_at = sdl.GetTicks()
 				caret_state.has_input_activity = true
 
+			case .MOUSE_WHEEL:
+				if e.wheel.y > 0 {
+					selected_index = max(0, selected_index-1)
+				} else if e.wheel.y < 0 {
+					selected_index = min(len(DUMMY_APPLICATIONS)-1, selected_index+1)
+				}
+
 			case .QUIT:
 				running = false
 			}
 		}
+
+		if selected_index < scroll_offset {
+			scroll_offset = selected_index
+		} else if selected_index >= scroll_offset+visible_row_count {
+			scroll_offset = selected_index-visible_row_count+1
+		}
+		max_scroll_offset := max(0, len(DUMMY_APPLICATIONS)-visible_row_count)
+		scroll_offset = min(scroll_offset, max_scroll_offset)
 
 		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 0)
 		sdl.RenderClear(renderer)
@@ -424,6 +526,61 @@ main_window :: proc(title: cstring) {
 			render_scale_x,
 			f32(font_height),
 		)
+
+		assert(sdl.SetRenderClipRect(renderer, &list_clip))
+		visible_end := min(
+			len(DUMMY_APPLICATIONS),
+			scroll_offset+visible_row_count,
+		)
+		for application_index in scroll_offset ..< visible_end {
+			visible_index := application_index-scroll_offset
+			row_y := list_y+f32(visible_index)*row_height
+
+			if application_index == selected_index {
+				selected_rect := sdl.FRect {
+					x = list_x,
+					y = row_y,
+					w = list_width,
+					h = row_height,
+				}
+				sdl.SetRenderDrawColor(
+					renderer,
+					selected_color.r,
+					selected_color.g,
+					selected_color.b,
+					selected_color.a,
+				)
+				sdl.RenderFillRect(renderer, &selected_rect)
+			}
+
+			row_text_x := list_x+10*render_scale_x
+			assert(ttf.DrawRendererText(
+				application_name_texts[application_index],
+				row_text_x,
+				row_y+4*render_scale_y,
+			))
+			assert(ttf.DrawRendererText(
+				application_description_texts[application_index],
+				row_text_x,
+				row_y+24*render_scale_y,
+			))
+
+			separator := sdl.FRect {
+				x = list_x+10*render_scale_x,
+				y = row_y+row_height-render_scale_y,
+				w = list_width-20*render_scale_x,
+				h = render_scale_y,
+			}
+			sdl.SetRenderDrawColor(
+				renderer,
+				separator_color.r,
+				separator_color.g,
+				separator_color.b,
+				separator_color.a,
+			)
+			sdl.RenderFillRect(renderer, &separator)
+		}
+		assert(sdl.SetRenderClipRect(renderer, nil))
 
 		sdl.RenderTexture(renderer, border_texture, nil, &content_rect)
 		sdl.RenderPresent(renderer)
