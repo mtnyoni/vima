@@ -14,6 +14,9 @@ WINDOW_HEIGHT: i32 = 400
 WINDOW_RADIUS: i32 = 8
 WINDOW_BORDER_WIDTH: i32 = 1
 INPUT_HEIGHT: f32 = 36
+INPUT_RADIUS: i32 = 6
+INPUT_FONT_SIZE: f32 = 18
+CARET_HEIGHT_RATIO: f32 = 0.75
 
 inside_rounded_rect :: proc(x, y, width, height, radius: i32) -> bool {
 	if x < 0 || y < 0 || x >= width || y >= height {
@@ -66,6 +69,48 @@ rounded_window_border :: proc(width, height, radius, border_width: i32) -> ^sdl.
 	}
 
 	return border
+}
+
+rounded_input_surface :: proc(width, height, radius, border_width: i32) -> ^sdl.Surface {
+	surface := sdl.CreateSurface(width, height, .RGBA8888)
+	if surface == nil {
+		return nil
+	}
+
+	inner_radius := radius - border_width
+	if inner_radius < 0 {
+		inner_radius = 0
+	}
+
+	for y in 0 ..< height {
+		for x in 0 ..< width {
+			outer := inside_rounded_rect(x, y, width, height, radius)
+			inner := inside_rounded_rect(
+				x - border_width,
+				y - border_width,
+				width - border_width * 2,
+				height - border_width * 2,
+				inner_radius,
+			)
+
+			r, g, b, a: u8
+			switch {
+			case !outer:
+				r, g, b, a = 0, 0, 0, 0
+			case !inner:
+				r, g, b, a = 80, 80, 80, 255
+			case:
+				r, g, b, a = 42, 42, 42, 255
+			}
+
+			if !sdl.WriteSurfacePixel(surface, x, y, r, g, b, a) {
+				sdl.DestroySurface(surface)
+				return nil
+			}
+		}
+	}
+
+	return surface
 }
 
 rounded_window_shape :: proc(width, height, radius: i32) -> ^sdl.Surface {
@@ -157,15 +202,16 @@ main_window :: proc(title: cstring) {
 
 	render_width, render_height: i32
 	assert(sdl.GetCurrentRenderOutputSize(renderer, &render_width, &render_height))
-	render_scale_x := f32(render_width)/f32(WINDOW_WIDTH)
-	render_scale_y := f32(render_height)/f32(WINDOW_HEIGHT)
+	render_scale_x := f32(render_width) / f32(WINDOW_WIDTH)
+	render_scale_y := f32(render_height) / f32(WINDOW_HEIGHT)
 
 	font := ttf.OpenFont(
 		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-		20*render_scale_y,
+		INPUT_FONT_SIZE * render_scale_y,
 	)
 	assert(font != nil)
 	defer ttf.CloseFont(font)
+	font_height := ttf.GetFontHeight(font)
 
 	text_engine := ttf.CreateRendererTextEngine(renderer)
 	assert(text_engine != nil)
@@ -179,14 +225,36 @@ main_window :: proc(title: cstring) {
 	border_surface := rounded_window_border(
 		render_width,
 		render_height,
-		i32(f32(WINDOW_RADIUS)*render_scale_y),
-		i32(f32(WINDOW_BORDER_WIDTH)*render_scale_y),
+		i32(f32(WINDOW_RADIUS) * render_scale_y),
+		i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
 	)
 	assert(border_surface != nil)
 	border_texture := sdl.CreateTextureFromSurface(renderer, border_surface)
 	sdl.DestroySurface(border_surface)
 	assert(border_texture != nil)
 	defer sdl.DestroyTexture(border_texture)
+
+	input_x := 4 * render_scale_x
+	input_y := 4 * render_scale_y
+	input_width := f32(render_width) - input_x * 2
+	input_height := INPUT_HEIGHT * render_scale_y
+	input_surface := rounded_input_surface(
+		i32(input_width),
+		i32(input_height),
+		i32(f32(INPUT_RADIUS) * render_scale_y),
+		i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
+	)
+	assert(input_surface != nil)
+	input_texture := sdl.CreateTextureFromSurface(renderer, input_surface)
+	sdl.DestroySurface(input_surface)
+	assert(input_texture != nil)
+	defer sdl.DestroyTexture(input_texture)
+	input_rect := sdl.FRect {
+		x = input_x,
+		y = input_y,
+		w = input_width,
+		h = input_height,
+	}
 
 	input: strings.Builder
 	strings.builder_init(&input, 0, 256)
@@ -222,34 +290,7 @@ main_window :: proc(title: cstring) {
 		sdl.SetRenderDrawColor(renderer, 30, 30, 30, 255)
 		sdl.RenderClear(renderer)
 
-		InputRectMargin :: struct {
-			x: f32,
-			y: f32,
-		}
-
-		margs := InputRectMargin {
-			x = 4*render_scale_x,
-			y = 4*render_scale_y,
-		}
-		input_height := INPUT_HEIGHT*render_scale_y
-
-		input_rect := sdl.FRect {
-			x = margs.x,
-			y = margs.y,
-			w = f32(render_width)-margs.x*2,
-			h = input_height,
-		}
-		sdl.SetRenderDrawColor(renderer, 42, 42, 42, 255)
-		sdl.RenderFillRect(renderer, &input_rect)
-
-		input_divider := sdl.FRect {
-			x = margs.x,
-			y = margs.y+input_height-render_scale_y,
-			w = f32(render_width)-margs.x*2,
-			h = render_scale_y,
-		}
-		sdl.SetRenderDrawColor(renderer, 80, 80, 80, 255)
-		sdl.RenderFillRect(renderer, &input_divider)
+		sdl.RenderTexture(renderer, input_texture, nil, &input_rect)
 
 		if input_dirty {
 			input_value, input_error := strings.to_cstring(&input)
@@ -258,17 +299,18 @@ main_window :: proc(title: cstring) {
 			input_dirty = false
 		}
 
-		text_x := margs.x+6*render_scale_x
-		text_y := margs.y+10*render_scale_y
+		text_width: i32
+		assert(ttf.GetTextSize(input_text, &text_width, nil))
+		text_x := input_x + 6 * render_scale_x
+		text_y := input_y + (input_height - f32(font_height)) / 2
 		assert(ttf.DrawRendererText(input_text, text_x, text_y))
 
-		text_width, text_height: i32
-		assert(ttf.GetTextSize(input_text, &text_width, &text_height))
+		caret_height := f32(font_height) * CARET_HEIGHT_RATIO
 		caret := sdl.FRect {
-			x = text_x+f32(text_width)+render_scale_x,
-			y = text_y,
+			x = text_x + f32(text_width) + render_scale_x,
+			y = input_y + (input_height - caret_height) / 2,
 			w = render_scale_x,
-			h = f32(text_height),
+			h = caret_height,
 		}
 		sdl.SetRenderDrawColor(renderer, 235, 235, 235, 255)
 		sdl.RenderFillRect(renderer, &caret)
