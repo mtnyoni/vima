@@ -22,6 +22,7 @@ WINDOW_SHADOW_PADDING: i32 = 12
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 18
+FONT_SIZE_SCALE: f32 = 1.2
 LIST_HIGHLIGHT_RADIUS: i32 = 5
 LIST_DESCRIPTION_SIZE_RATIO :: 11.0 / 13.0
 LIST_ROW_HEIGHT_RATIO :: 32.0 / 13.0
@@ -336,12 +337,12 @@ main_window :: proc(title: cstring) {
 
 	font := ttf.OpenFont(
 		DEFAULT_FONT_PATH,
-		INPUT_FONT_SIZE * render_scale_y,
+		INPUT_FONT_SIZE * FONT_SIZE_SCALE * render_scale_y,
 	)
 	assert(font != nil)
 	defer ttf.CloseFont(font)
 	font_height := ttf.GetFontHeight(font)
-	list_font_size := system_font_size()
+	list_font_size := system_font_size() * FONT_SIZE_SCALE
 	list_name_font := ttf.OpenFont(
 		DEFAULT_FONT_PATH,
 		list_font_size * render_scale_y,
@@ -514,6 +515,21 @@ main_window :: proc(title: cstring) {
 						len(DUMMY_APPLICATIONS) - 1,
 					)
 					last_wheel_scroll_at = now
+				}
+
+			case .MOUSE_BUTTON_DOWN:
+				if e.button.button == sdl.BUTTON_LEFT {
+					mouse_x := e.button.x * render_scale_x
+					mouse_y := e.button.y * render_scale_y
+					if mouse_x >= list_x && mouse_x < list_x + list_width &&
+					   mouse_y >= list_y && mouse_y < list_y + list_height {
+						visible_index := int((mouse_y - list_y) / row_height)
+						clicked_index := scroll_offset + visible_index
+						if clicked_index < len(DUMMY_APPLICATIONS) &&
+						   visible_index < visible_row_count {
+							selected_index = clicked_index
+						}
+					}
 				}
 
 			case .QUIT:
