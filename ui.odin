@@ -22,10 +22,9 @@ WINDOW_SHADOW_PADDING: i32 = 12
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 18
-LIST_ROW_HEIGHT: f32 = 32
 LIST_HIGHLIGHT_RADIUS: i32 = 5
-LIST_NAME_FONT_SIZE: f32 = 13
-LIST_DESCRIPTION_FONT_SIZE: f32 = 11
+LIST_DESCRIPTION_SIZE_RATIO :: 11.0 / 13.0
+LIST_ROW_HEIGHT_RATIO :: 32.0 / 13.0
 WHEEL_SCROLL_INTERVAL: u64 = 90
 
 CARET_HEIGHT_RATIO: f32 = 0.75
@@ -342,16 +341,17 @@ main_window :: proc(title: cstring) {
 	assert(font != nil)
 	defer ttf.CloseFont(font)
 	font_height := ttf.GetFontHeight(font)
+	list_font_size := system_font_size()
 	list_name_font := ttf.OpenFont(
 		DEFAULT_FONT_PATH,
-		LIST_NAME_FONT_SIZE * render_scale_y,
+		list_font_size * render_scale_y,
 	)
 	assert(list_name_font != nil)
 	defer ttf.CloseFont(list_name_font)
 	list_name_height := ttf.GetFontHeight(list_name_font)
 	list_description_font := ttf.OpenFont(
 		DEFAULT_FONT_PATH,
-		LIST_DESCRIPTION_FONT_SIZE * render_scale_y,
+		list_font_size * LIST_DESCRIPTION_SIZE_RATIO * render_scale_y,
 	)
 	assert(list_description_font != nil)
 	defer ttf.CloseFont(list_description_font)
@@ -434,7 +434,7 @@ main_window :: proc(title: cstring) {
 	list_y := input_y + input_height + 4 * render_scale_y
 	list_width := input_width
 	list_height := shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
-	row_height := LIST_ROW_HEIGHT * render_scale_y
+	row_height := list_font_size * LIST_ROW_HEIGHT_RATIO * render_scale_y
 	visible_row_count := max(1, int(list_height / row_height))
 	max_scroll_offset := max(0, len(DUMMY_APPLICATIONS) - visible_row_count)
 	list_clip := sdl.Rect {
