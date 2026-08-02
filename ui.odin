@@ -16,7 +16,63 @@ WINDOW_BORDER_WIDTH: i32 = 1
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 18
+
 CARET_HEIGHT_RATIO: f32 = 0.75
+CARET_BLINK_INTERVAL: u64 = 500
+CARET_TYPING_HOLD: u64 = 650
+
+
+Color :: struct {
+	r: u8,
+	g: u8,
+	b: u8,
+	a: u8,
+}
+
+app_color: Color = Color{48, 52, 70, 255} // Frappé Base: #303446
+input_border_color: Color = Color{81, 87, 109, 255} // Frappé Surface 1: #51576d
+window_border_color: Color = Color{98, 104, 128, 255} // Frappé Surface 2: #626880
+text_color: Color = Color{198, 208, 245, 255} // Frappé Text: #c6d0f5
+
+Caret_State :: struct {
+	last_input_at:      u64,
+	has_input_activity: bool,
+}
+
+render_caret :: proc(
+	renderer: ^sdl.Renderer,
+	state: ^Caret_State,
+	x, input_y, input_height, width, font_height: f32,
+) {
+	now := sdl.GetTicks()
+	visible := false
+
+	if state.has_input_activity {
+		idle_time := now - state.last_input_at
+		if idle_time <= CARET_TYPING_HOLD {
+			visible = true
+		} else {
+			blink_time := idle_time - CARET_TYPING_HOLD
+			visible = blink_time / CARET_BLINK_INTERVAL % 2 == 0
+		}
+	} else {
+		visible = now / CARET_BLINK_INTERVAL % 2 == 0
+	}
+
+	if !visible {
+		return
+	}
+
+	caret_height := font_height * CARET_HEIGHT_RATIO
+	caret := sdl.FRect {
+		x = x,
+		y = input_y + (input_height - caret_height) / 2,
+		w = width,
+		h = caret_height,
+	}
+	sdl.SetRenderDrawColor(renderer, text_color.r, text_color.g, text_color.b, text_color.a)
+	sdl.RenderFillRect(renderer, &caret)
+}
 
 inside_rounded_rect :: proc(x, y, width, height, radius: i32) -> bool {
 	if x < 0 || y < 0 || x >= width || y >= height {
@@ -34,7 +90,10 @@ inside_rounded_rect :: proc(x, y, width, height, radius: i32) -> bool {
 	return dx * dx + dy * dy <= radius * radius
 }
 
-rounded_window_border :: proc(width, height, radius, border_width: i32) -> ^sdl.Surface {
+rounded_window_border :: proc(
+	width, height, radius, border_width: i32,
+	color: Color,
+) -> ^sdl.Surface {
 	border := sdl.CreateSurface(width, height, .RGBA8888)
 	if border == nil {
 		return nil
@@ -61,7 +120,7 @@ rounded_window_border :: proc(width, height, radius, border_width: i32) -> ^sdl.
 				alpha = 255
 			}
 
-			if !sdl.WriteSurfacePixel(border, x, y, 100, 100, 100, alpha) {
+			if !sdl.WriteSurfacePixel(border, x, y, color.r, color.g, color.b, alpha) {
 				sdl.DestroySurface(border)
 				return nil
 			}
@@ -71,7 +130,11 @@ rounded_window_border :: proc(width, height, radius, border_width: i32) -> ^sdl.
 	return border
 }
 
-rounded_input_surface :: proc(width, height, radius, border_width: i32) -> ^sdl.Surface {
+rounded_input_surface :: proc(
+	width, height, radius, border_width: i32,
+	background: Color,
+	border_color: Color,
+) -> ^sdl.Surface {
 	surface := sdl.CreateSurface(width, height, .RGBA8888)
 	if surface == nil {
 		return nil
@@ -97,10 +160,12 @@ rounded_input_surface :: proc(width, height, radius, border_width: i32) -> ^sdl.
 			switch {
 			case !outer:
 				r, g, b, a = 0, 0, 0, 0
+
 			case !inner:
-				r, g, b, a = 80, 80, 80, 255
+				r, g, b, a = border_color.r, border_color.g, border_color.b, border_color.a
+
 			case:
-				r, g, b, a = 42, 42, 42, 255
+				r, g, b, a = background.r, background.g, background.b, background.a
 			}
 
 			if !sdl.WriteSurfacePixel(surface, x, y, r, g, b, a) {
@@ -220,13 +285,14 @@ main_window :: proc(title: cstring) {
 	input_text := ttf.CreateText(text_engine, font, "", 0)
 	assert(input_text != nil)
 	defer ttf.DestroyText(input_text)
-	assert(ttf.SetTextColor(input_text, 235, 235, 235, 255))
+	assert(ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a))
 
 	border_surface := rounded_window_border(
 		render_width,
 		render_height,
 		i32(f32(WINDOW_RADIUS) * render_scale_y),
 		i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
+		window_border_color,
 	)
 	assert(border_surface != nil)
 	border_texture := sdl.CreateTextureFromSurface(renderer, border_surface)
@@ -243,12 +309,15 @@ main_window :: proc(title: cstring) {
 		i32(input_height),
 		i32(f32(INPUT_RADIUS) * render_scale_y),
 		i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
+		app_color,
+		input_border_color,
 	)
 	assert(input_surface != nil)
 	input_texture := sdl.CreateTextureFromSurface(renderer, input_surface)
 	sdl.DestroySurface(input_surface)
 	assert(input_texture != nil)
 	defer sdl.DestroyTexture(input_texture)
+
 	input_rect := sdl.FRect {
 		x = input_x,
 		y = input_y,
@@ -264,6 +333,7 @@ main_window :: proc(title: cstring) {
 	defer _ = sdl.StopTextInput(window)
 
 	input_dirty := true
+	caret_state: Caret_State
 	running := true
 	for running {
 		e: sdl.Event
@@ -276,18 +346,22 @@ main_window :: proc(title: cstring) {
 				} else if e.key.scancode == .BACKSPACE {
 					_, _ = strings.pop_rune(&input)
 					input_dirty = true
+					caret_state.last_input_at = sdl.GetTicks()
+					caret_state.has_input_activity = true
 				}
 
 			case .TEXT_INPUT:
 				strings.write_string(&input, string(e.text.text))
 				input_dirty = true
+				caret_state.last_input_at = sdl.GetTicks()
+				caret_state.has_input_activity = true
 
 			case .QUIT:
 				running = false
 			}
 		}
 
-		sdl.SetRenderDrawColor(renderer, 30, 30, 30, 255)
+		sdl.SetRenderDrawColor(renderer, app_color.r, app_color.g, app_color.b, app_color.a)
 		sdl.RenderClear(renderer)
 
 		sdl.RenderTexture(renderer, input_texture, nil, &input_rect)
@@ -305,15 +379,15 @@ main_window :: proc(title: cstring) {
 		text_y := input_y + (input_height - f32(font_height)) / 2
 		assert(ttf.DrawRendererText(input_text, text_x, text_y))
 
-		caret_height := f32(font_height) * CARET_HEIGHT_RATIO
-		caret := sdl.FRect {
-			x = text_x + f32(text_width) + render_scale_x,
-			y = input_y + (input_height - caret_height) / 2,
-			w = render_scale_x,
-			h = caret_height,
-		}
-		sdl.SetRenderDrawColor(renderer, 235, 235, 235, 255)
-		sdl.RenderFillRect(renderer, &caret)
+		render_caret(
+			renderer,
+			&caret_state,
+			text_x + f32(text_width) + render_scale_x,
+			input_y,
+			input_height,
+			render_scale_x,
+			f32(font_height),
+		)
 
 		sdl.RenderTexture(renderer, border_texture, nil, nil)
 		sdl.RenderPresent(renderer)
