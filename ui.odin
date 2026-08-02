@@ -17,9 +17,11 @@ WINDOW_SHADOW_PADDING: i32 = 12
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 18
-LIST_ROW_HEIGHT: f32 = 44
-LIST_NAME_FONT_SIZE: f32 = 15
-LIST_DESCRIPTION_FONT_SIZE: f32 = 12
+LIST_ROW_HEIGHT: f32 = 32
+LIST_HIGHLIGHT_RADIUS: i32 = 5
+LIST_NAME_FONT_SIZE: f32 = 13
+LIST_DESCRIPTION_FONT_SIZE: f32 = 11
+WHEEL_SCROLL_INTERVAL: u64 = 90
 
 CARET_HEIGHT_RATIO: f32 = 0.75
 CARET_BLINK_INTERVAL: u64 = 500
@@ -337,16 +339,18 @@ main_window :: proc(title: cstring) {
 	font_height := ttf.GetFontHeight(font)
 	list_name_font := ttf.OpenFont(
 		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-		LIST_NAME_FONT_SIZE*render_scale_y,
+		LIST_NAME_FONT_SIZE * render_scale_y,
 	)
 	assert(list_name_font != nil)
 	defer ttf.CloseFont(list_name_font)
+	list_name_height := ttf.GetFontHeight(list_name_font)
 	list_description_font := ttf.OpenFont(
 		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-		LIST_DESCRIPTION_FONT_SIZE*render_scale_y,
+		LIST_DESCRIPTION_FONT_SIZE * render_scale_y,
 	)
 	assert(list_description_font != nil)
 	defer ttf.CloseFont(list_description_font)
+	list_description_height := ttf.GetFontHeight(list_description_font)
 
 	text_engine := ttf.CreateRendererTextEngine(renderer)
 	assert(text_engine != nil)
@@ -422,17 +426,31 @@ main_window :: proc(title: cstring) {
 		h = input_height,
 	}
 	list_x := input_x
-	list_y := input_y+input_height+4*render_scale_y
+	list_y := input_y + input_height + 4 * render_scale_y
 	list_width := input_width
-	list_height := shadow_padding_y+f32(content_height)-4*render_scale_y-list_y
-	row_height := LIST_ROW_HEIGHT*render_scale_y
-	visible_row_count := max(1, int(list_height/row_height))
+	list_height := shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
+	row_height := LIST_ROW_HEIGHT * render_scale_y
+	visible_row_count := max(1, int(list_height / row_height))
+	max_scroll_offset := max(0, len(DUMMY_APPLICATIONS) - visible_row_count)
 	list_clip := sdl.Rect {
 		x = i32(list_x),
 		y = i32(list_y),
 		w = i32(list_width),
 		h = i32(list_height),
 	}
+	highlight_surface := rounded_input_surface(
+		i32(list_width),
+		i32(row_height),
+		i32(f32(LIST_HIGHLIGHT_RADIUS) * render_scale_y),
+		0,
+		selected_color,
+		selected_color,
+	)
+	assert(highlight_surface != nil)
+	highlight_texture := sdl.CreateTextureFromSurface(renderer, highlight_surface)
+	sdl.DestroySurface(highlight_surface)
+	assert(highlight_texture != nil)
+	defer sdl.DestroyTexture(highlight_texture)
 
 	input: strings.Builder
 	strings.builder_init(&input, 0, 256)
@@ -445,6 +463,7 @@ main_window :: proc(title: cstring) {
 	caret_state: Caret_State
 	selected_index := 0
 	scroll_offset := 0
+	last_wheel_scroll_at: u64
 	running := true
 	for running {
 		e: sdl.Event
@@ -455,15 +474,15 @@ main_window :: proc(title: cstring) {
 				if e.key.scancode == .ESCAPE {
 					running = false
 				} else if e.key.scancode == .UP {
-					selected_index = max(0, selected_index-1)
+					selected_index = max(0, selected_index - 1)
 				} else if e.key.scancode == .DOWN {
-					selected_index = min(len(DUMMY_APPLICATIONS)-1, selected_index+1)
+					selected_index = min(len(DUMMY_APPLICATIONS) - 1, selected_index + 1)
 				} else if e.key.scancode == .PAGEUP {
-					selected_index = max(0, selected_index-visible_row_count)
+					selected_index = max(0, selected_index - visible_row_count)
 				} else if e.key.scancode == .PAGEDOWN {
 					selected_index = min(
-						len(DUMMY_APPLICATIONS)-1,
-						selected_index+visible_row_count,
+						len(DUMMY_APPLICATIONS) - 1,
+						selected_index + visible_row_count,
 					)
 				} else if e.key.scancode == .BACKSPACE {
 					_, _ = strings.pop_rune(&input)
@@ -479,10 +498,17 @@ main_window :: proc(title: cstring) {
 				caret_state.has_input_activity = true
 
 			case .MOUSE_WHEEL:
-				if e.wheel.y > 0 {
-					selected_index = max(0, selected_index-1)
-				} else if e.wheel.y < 0 {
-					selected_index = min(len(DUMMY_APPLICATIONS)-1, selected_index+1)
+				now := sdl.GetTicks()
+				if e.wheel.y != 0 &&
+				   (last_wheel_scroll_at == 0 ||
+						   now - last_wheel_scroll_at >= WHEEL_SCROLL_INTERVAL) {
+					direction := -1 if e.wheel.y > 0 else 1
+					selected_index = clamp(
+						selected_index + direction,
+						0,
+						len(DUMMY_APPLICATIONS) - 1,
+					)
+					last_wheel_scroll_at = now
 				}
 
 			case .QUIT:
@@ -492,10 +518,9 @@ main_window :: proc(title: cstring) {
 
 		if selected_index < scroll_offset {
 			scroll_offset = selected_index
-		} else if selected_index >= scroll_offset+visible_row_count {
-			scroll_offset = selected_index-visible_row_count+1
+		} else if selected_index >= scroll_offset + visible_row_count {
+			scroll_offset = selected_index - visible_row_count + 1
 		}
-		max_scroll_offset := max(0, len(DUMMY_APPLICATIONS)-visible_row_count)
 		scroll_offset = min(scroll_offset, max_scroll_offset)
 
 		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 0)
@@ -528,13 +553,10 @@ main_window :: proc(title: cstring) {
 		)
 
 		assert(sdl.SetRenderClipRect(renderer, &list_clip))
-		visible_end := min(
-			len(DUMMY_APPLICATIONS),
-			scroll_offset+visible_row_count,
-		)
+		visible_end := min(len(DUMMY_APPLICATIONS), scroll_offset + visible_row_count)
 		for application_index in scroll_offset ..< visible_end {
-			visible_index := application_index-scroll_offset
-			row_y := list_y+f32(visible_index)*row_height
+			visible_index := application_index - scroll_offset
+			row_y := list_y + f32(visible_index) * row_height
 
 			if application_index == selected_index {
 				selected_rect := sdl.FRect {
@@ -543,32 +565,31 @@ main_window :: proc(title: cstring) {
 					w = list_width,
 					h = row_height,
 				}
-				sdl.SetRenderDrawColor(
-					renderer,
-					selected_color.r,
-					selected_color.g,
-					selected_color.b,
-					selected_color.a,
-				)
-				sdl.RenderFillRect(renderer, &selected_rect)
+				sdl.RenderTexture(renderer, highlight_texture, nil, &selected_rect)
 			}
 
-			row_text_x := list_x+10*render_scale_x
-			assert(ttf.DrawRendererText(
-				application_name_texts[application_index],
-				row_text_x,
-				row_y+4*render_scale_y,
-			))
-			assert(ttf.DrawRendererText(
-				application_description_texts[application_index],
-				row_text_x,
-				row_y+24*render_scale_y,
-			))
+			row_text_x := list_x + 10 * render_scale_x
+			name_width: i32
+			assert(ttf.GetTextSize(application_name_texts[application_index], &name_width, nil))
+			assert(
+				ttf.DrawRendererText(
+					application_name_texts[application_index],
+					row_text_x,
+					row_y + (row_height - f32(list_name_height)) / 2,
+				),
+			)
+			assert(
+				ttf.DrawRendererText(
+					application_description_texts[application_index],
+					row_text_x + f32(name_width) + 8 * render_scale_x,
+					row_y + (row_height - f32(list_description_height)) / 2,
+				),
+			)
 
 			separator := sdl.FRect {
-				x = list_x+10*render_scale_x,
-				y = row_y+row_height-render_scale_y,
-				w = list_width-20*render_scale_x,
+				x = list_x + 10 * render_scale_x,
+				y = row_y + row_height - render_scale_y,
+				w = list_width - 20 * render_scale_x,
 				h = render_scale_y,
 			}
 			sdl.SetRenderDrawColor(
