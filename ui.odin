@@ -1,10 +1,13 @@
 package main
 
+import "core:c"
 import "core:fmt"
 import "core:mem"
 import "core:strings"
 
 import sdl "vendor:sdl3"
+import ttf "vendor:sdl3/ttf"
+
 
 WINDOW_WIDTH: i32 = 720
 WINDOW_HEIGHT: i32 = 400
@@ -113,6 +116,7 @@ rounded_window_shape :: proc(width, height, radius: i32) -> ^sdl.Surface {
 	return shape
 }
 
+
 main_window :: proc(title: cstring) {
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
@@ -129,6 +133,9 @@ main_window :: proc(title: cstring) {
 
 	assert(sdl.Init(sdl.INIT_VIDEO))
 	defer sdl.Quit()
+
+	assert(ttf.Init())
+	defer ttf.Quit()
 
 	window := sdl.CreateWindow(
 		title,
@@ -147,6 +154,20 @@ main_window :: proc(title: cstring) {
 	renderer := sdl.CreateRenderer(window, nil)
 	assert(renderer != nil)
 	defer sdl.DestroyRenderer(renderer)
+	assert(sdl.SetRenderLogicalPresentation(renderer, WINDOW_WIDTH, WINDOW_HEIGHT, .STRETCH))
+
+	font := ttf.OpenFont("/usr/share/fonts/google-noto/NotoSans-Regular.ttf", 20)
+	assert(font != nil)
+	defer ttf.CloseFont(font)
+
+	text_engine := ttf.CreateRendererTextEngine(renderer)
+	assert(text_engine != nil)
+	defer ttf.DestroyRendererTextEngine(text_engine)
+
+	input_text := ttf.CreateText(text_engine, font, "", 0)
+	assert(input_text != nil)
+	defer ttf.DestroyText(input_text)
+	assert(ttf.SetTextColor(input_text, 235, 235, 235, 255))
 
 	border_surface := rounded_window_border(
 		WINDOW_WIDTH,
@@ -165,8 +186,9 @@ main_window :: proc(title: cstring) {
 	defer strings.builder_destroy(&input)
 
 	assert(sdl.StartTextInput(window))
-	defer sdl.StopTextInput(window)
+	defer _ = sdl.StopTextInput(window)
 
+	input_dirty := true
 	running := true
 	for running {
 		e: sdl.Event
@@ -178,10 +200,12 @@ main_window :: proc(title: cstring) {
 					running = false
 				} else if e.key.scancode == .BACKSPACE {
 					_, _ = strings.pop_rune(&input)
+					input_dirty = true
 				}
 
 			case .TEXT_INPUT:
-				strings.write_string(&input, string(e.text))
+				strings.write_string(&input, string(e.text.text))
+				input_dirty = true
 
 			case .QUIT:
 				running = false
@@ -191,28 +215,55 @@ main_window :: proc(title: cstring) {
 		sdl.SetRenderDrawColor(renderer, 30, 30, 30, 255)
 		sdl.RenderClear(renderer)
 
-		input_rect := sdl.FRect{
-			x = 0,
-			y = 0,
-			w = f32(WINDOW_WIDTH),
+		InputRectMargin :: struct {
+			x: f32,
+			y: f32,
+		}
+
+		margs := InputRectMargin {
+			x = 4,
+			y = 4,
+		}
+
+		input_rect := sdl.FRect {
+			x = margs.x,
+			y = margs.y,
+			w = f32(WINDOW_WIDTH) - margs.x * 2,
 			h = INPUT_HEIGHT,
 		}
 		sdl.SetRenderDrawColor(renderer, 42, 42, 42, 255)
 		sdl.RenderFillRect(renderer, &input_rect)
 
-		input_divider := sdl.FRect{
-			x = 0,
-			y = INPUT_HEIGHT-1,
-			w = f32(WINDOW_WIDTH),
+		input_divider := sdl.FRect {
+			x = margs.x,
+			y = margs.y + INPUT_HEIGHT - 1,
+			w = f32(WINDOW_WIDTH) - margs.x * 2,
 			h = 1,
 		}
 		sdl.SetRenderDrawColor(renderer, 80, 80, 80, 255)
 		sdl.RenderFillRect(renderer, &input_divider)
 
-		input_text := strings.to_cstring(&input) or_return
+		if input_dirty {
+			input_value, input_error := strings.to_cstring(&input)
+			assert(input_error == nil)
+			assert(ttf.SetTextString(input_text, input_value, c.size_t(len(input.buf))))
+			input_dirty = false
+		}
+
+		text_x := margs.x + 6
+		text_y := margs.y + 10
+		assert(ttf.DrawRendererText(input_text, text_x, text_y))
+
+		text_width, text_height: i32
+		assert(ttf.GetTextSize(input_text, &text_width, &text_height))
+		caret := sdl.FRect {
+			x = text_x + f32(text_width) + 1,
+			y = text_y,
+			w = 1,
+			h = f32(text_height),
+		}
 		sdl.SetRenderDrawColor(renderer, 235, 235, 235, 255)
-		sdl.RenderDebugText(renderer, 12, 20, input_text)
-		sdl.RenderDebugText(renderer, 12+f32(len(input.buf))*8, 20, "|")
+		sdl.RenderFillRect(renderer, &caret)
 
 		sdl.RenderTexture(renderer, border_texture, nil, nil)
 		sdl.RenderPresent(renderer)
