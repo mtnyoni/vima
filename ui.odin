@@ -8,6 +8,11 @@ import "core:strings"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
+when ODIN_OS == .Windows {
+	DEFAULT_FONT_PATH :: "C:/Windows/Fonts/segoeui.ttf"
+} else {
+	DEFAULT_FONT_PATH :: "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
+}
 
 WINDOW_WIDTH: i32 = 720
 WINDOW_HEIGHT: i32 = 400
@@ -331,21 +336,21 @@ main_window :: proc(title: cstring) {
 	defer sdl.DestroyTexture(backdrop_texture)
 
 	font := ttf.OpenFont(
-		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+		DEFAULT_FONT_PATH,
 		INPUT_FONT_SIZE * render_scale_y,
 	)
 	assert(font != nil)
 	defer ttf.CloseFont(font)
 	font_height := ttf.GetFontHeight(font)
 	list_name_font := ttf.OpenFont(
-		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+		DEFAULT_FONT_PATH,
 		LIST_NAME_FONT_SIZE * render_scale_y,
 	)
 	assert(list_name_font != nil)
 	defer ttf.CloseFont(list_name_font)
 	list_name_height := ttf.GetFontHeight(list_name_font)
 	list_description_font := ttf.OpenFont(
-		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+		DEFAULT_FONT_PATH,
 		LIST_DESCRIPTION_FONT_SIZE * render_scale_y,
 	)
 	assert(list_description_font != nil)

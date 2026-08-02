@@ -6,11 +6,12 @@ import "core:strings"
 
 main :: proc() {
 	args := os.args
-	if len(args) == 0 {
-		return
+	title_value := "Vima"
+	if len(args) > 1 {
+		title_value = args[1]
 	}
 
-	title: cstring = strings.clone_to_cstring(args[1])
+	title: cstring = strings.clone_to_cstring(title_value)
 	defer delete(title)
 	main_window(title)
 }
