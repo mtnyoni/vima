@@ -13,6 +13,7 @@ WINDOW_WIDTH: i32 = 720
 WINDOW_HEIGHT: i32 = 400
 WINDOW_RADIUS: i32 = 8
 WINDOW_BORDER_WIDTH: i32 = 1
+WINDOW_SHADOW_PADDING: i32 = 12
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 18
@@ -29,10 +30,11 @@ Color :: struct {
 	a: u8,
 }
 
-app_color: Color = Color{48, 52, 70, 255} // Frappé Base: #303446
+app_color: Color = Color{35, 38, 52, 255} // Frappé Crust: #232634
 input_border_color: Color = Color{81, 87, 109, 255} // Frappé Surface 1: #51576d
 window_border_color: Color = Color{98, 104, 128, 255} // Frappé Surface 2: #626880
 text_color: Color = Color{198, 208, 245, 255} // Frappé Text: #c6d0f5
+shadow_color: Color = Color{35, 38, 52, 90} // Frappé Crust with soft alpha
 
 Caret_State :: struct {
 	last_input_at:      u64,
@@ -178,52 +180,52 @@ rounded_input_surface :: proc(
 	return surface
 }
 
-rounded_window_shape :: proc(width, height, radius: i32) -> ^sdl.Surface {
-	shape := sdl.CreateSurface(width, height, .RGBA8888)
-	if shape == nil {
+window_backdrop_surface :: proc(
+	content_width, content_height, padding, radius: i32,
+	background, shadow: Color,
+) -> ^sdl.Surface {
+	width := content_width+padding*2
+	height := content_height+padding*2
+	surface := sdl.CreateSurface(width, height, .RGBA8888)
+	if surface == nil {
 		return nil
 	}
 
 	for y in 0 ..< height {
 		for x in 0 ..< width {
-			corner := false
-			center_x, center_y: i32
-
-			switch {
-			case x < radius && y < radius:
-				corner = true
-				center_x, center_y = radius, radius
-
-			case x >= width - radius && y < radius:
-				corner = true
-				center_x, center_y = width - radius - 1, radius
-
-			case x < radius && y >= height - radius:
-				corner = true
-				center_x, center_y = radius, height - radius - 1
-
-			case x >= width - radius && y >= height - radius:
-				corner = true
-				center_x, center_y = width - radius - 1, height - radius - 1
-			}
-
-			alpha: u8 = 255
-			if corner {
-				dx := x - center_x
-				dy := y - center_y
-				if dx * dx + dy * dy > radius * radius {
-					alpha = 0
+			r, g, b, a: u8
+			if inside_rounded_rect(
+				x-padding,
+				y-padding,
+				content_width,
+				content_height,
+				radius,
+			) {
+				r, g, b, a = background.r, background.g, background.b, background.a
+			} else {
+				r, g, b, a = shadow.r, shadow.g, shadow.b, 0
+				for distance in 1 ..< padding+1 {
+					if inside_rounded_rect(
+						x-(padding-distance),
+						y-(padding-distance),
+						content_width+distance*2,
+						content_height+distance*2,
+						radius+distance,
+					) {
+						a = u8((padding-distance+1)*i32(shadow.a)/padding)
+						break
+					}
 				}
 			}
 
-			if !sdl.WriteSurfacePixel(shape, x, y, 255, 255, 255, alpha) {
-				sdl.DestroySurface(shape)
+			if !sdl.WriteSurfacePixel(surface, x, y, r, g, b, a) {
+				sdl.DestroySurface(surface)
 				return nil
 			}
 		}
 	}
 
-	return shape
+	return surface
 }
 
 
@@ -247,16 +249,25 @@ main_window :: proc(title: cstring) {
 	assert(ttf.Init())
 	defer ttf.Quit()
 
+	window_width := WINDOW_WIDTH+WINDOW_SHADOW_PADDING*2
+	window_height := WINDOW_HEIGHT+WINDOW_SHADOW_PADDING*2
 	window := sdl.CreateWindow(
 		title,
-		WINDOW_WIDTH,
-		WINDOW_HEIGHT,
+		window_width,
+		window_height,
 		{.HIGH_PIXEL_DENSITY, .BORDERLESS, .TRANSPARENT},
 	)
 	assert(window != nil)
 	defer sdl.DestroyWindow(window)
 
-	shape := rounded_window_shape(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RADIUS)
+	shape := window_backdrop_surface(
+		WINDOW_WIDTH,
+		WINDOW_HEIGHT,
+		WINDOW_SHADOW_PADDING,
+		WINDOW_RADIUS,
+		app_color,
+		shadow_color,
+	)
 	assert(shape != nil)
 	assert(sdl.SetWindowShape(window, shape))
 	sdl.DestroySurface(shape)
@@ -267,8 +278,32 @@ main_window :: proc(title: cstring) {
 
 	render_width, render_height: i32
 	assert(sdl.GetCurrentRenderOutputSize(renderer, &render_width, &render_height))
-	render_scale_x := f32(render_width) / f32(WINDOW_WIDTH)
-	render_scale_y := f32(render_height) / f32(WINDOW_HEIGHT)
+	render_scale_x := f32(render_width)/f32(window_width)
+	render_scale_y := f32(render_height)/f32(window_height)
+	shadow_padding_x := f32(WINDOW_SHADOW_PADDING)*render_scale_x
+	shadow_padding_y := f32(WINDOW_SHADOW_PADDING)*render_scale_y
+	content_width := render_width-i32(shadow_padding_x)*2
+	content_height := render_height-i32(shadow_padding_y)*2
+	content_rect := sdl.FRect {
+		x = shadow_padding_x,
+		y = shadow_padding_y,
+		w = f32(content_width),
+		h = f32(content_height),
+	}
+
+	backdrop_surface := window_backdrop_surface(
+		content_width,
+		content_height,
+		i32(shadow_padding_x),
+		i32(f32(WINDOW_RADIUS)*render_scale_y),
+		app_color,
+		shadow_color,
+	)
+	assert(backdrop_surface != nil)
+	backdrop_texture := sdl.CreateTextureFromSurface(renderer, backdrop_surface)
+	sdl.DestroySurface(backdrop_surface)
+	assert(backdrop_texture != nil)
+	defer sdl.DestroyTexture(backdrop_texture)
 
 	font := ttf.OpenFont(
 		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
@@ -288,8 +323,8 @@ main_window :: proc(title: cstring) {
 	assert(ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a))
 
 	border_surface := rounded_window_border(
-		render_width,
-		render_height,
+		content_width,
+		content_height,
 		i32(f32(WINDOW_RADIUS) * render_scale_y),
 		i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
 		window_border_color,
@@ -300,9 +335,9 @@ main_window :: proc(title: cstring) {
 	assert(border_texture != nil)
 	defer sdl.DestroyTexture(border_texture)
 
-	input_x := 4 * render_scale_x
-	input_y := 4 * render_scale_y
-	input_width := f32(render_width) - input_x * 2
+	input_x := shadow_padding_x+4*render_scale_x
+	input_y := shadow_padding_y+4*render_scale_y
+	input_width := f32(content_width)-8*render_scale_x
 	input_height := INPUT_HEIGHT * render_scale_y
 	input_surface := rounded_input_surface(
 		i32(input_width),
@@ -361,8 +396,9 @@ main_window :: proc(title: cstring) {
 			}
 		}
 
-		sdl.SetRenderDrawColor(renderer, app_color.r, app_color.g, app_color.b, app_color.a)
+		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 0)
 		sdl.RenderClear(renderer)
+		sdl.RenderTexture(renderer, backdrop_texture, nil, nil)
 
 		sdl.RenderTexture(renderer, input_texture, nil, &input_rect)
 
@@ -389,7 +425,7 @@ main_window :: proc(title: cstring) {
 			f32(font_height),
 		)
 
-		sdl.RenderTexture(renderer, border_texture, nil, nil)
+		sdl.RenderTexture(renderer, border_texture, nil, &content_rect)
 		sdl.RenderPresent(renderer)
 	}
 }
