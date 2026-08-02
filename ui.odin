@@ -13,7 +13,7 @@ WINDOW_WIDTH: i32 = 720
 WINDOW_HEIGHT: i32 = 400
 WINDOW_RADIUS: i32 = 8
 WINDOW_BORDER_WIDTH: i32 = 1
-INPUT_HEIGHT: f32 = 48
+INPUT_HEIGHT: f32 = 36
 
 inside_rounded_rect :: proc(x, y, width, height, radius: i32) -> bool {
 	if x < 0 || y < 0 || x >= width || y >= height {
@@ -154,9 +154,16 @@ main_window :: proc(title: cstring) {
 	renderer := sdl.CreateRenderer(window, nil)
 	assert(renderer != nil)
 	defer sdl.DestroyRenderer(renderer)
-	assert(sdl.SetRenderLogicalPresentation(renderer, WINDOW_WIDTH, WINDOW_HEIGHT, .STRETCH))
 
-	font := ttf.OpenFont("/usr/share/fonts/google-noto/NotoSans-Regular.ttf", 20)
+	render_width, render_height: i32
+	assert(sdl.GetCurrentRenderOutputSize(renderer, &render_width, &render_height))
+	render_scale_x := f32(render_width)/f32(WINDOW_WIDTH)
+	render_scale_y := f32(render_height)/f32(WINDOW_HEIGHT)
+
+	font := ttf.OpenFont(
+		"/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+		20*render_scale_y,
+	)
 	assert(font != nil)
 	defer ttf.CloseFont(font)
 
@@ -170,10 +177,10 @@ main_window :: proc(title: cstring) {
 	assert(ttf.SetTextColor(input_text, 235, 235, 235, 255))
 
 	border_surface := rounded_window_border(
-		WINDOW_WIDTH,
-		WINDOW_HEIGHT,
-		WINDOW_RADIUS,
-		WINDOW_BORDER_WIDTH,
+		render_width,
+		render_height,
+		i32(f32(WINDOW_RADIUS)*render_scale_y),
+		i32(f32(WINDOW_BORDER_WIDTH)*render_scale_y),
 	)
 	assert(border_surface != nil)
 	border_texture := sdl.CreateTextureFromSurface(renderer, border_surface)
@@ -221,24 +228,25 @@ main_window :: proc(title: cstring) {
 		}
 
 		margs := InputRectMargin {
-			x = 4,
-			y = 4,
+			x = 4*render_scale_x,
+			y = 4*render_scale_y,
 		}
+		input_height := INPUT_HEIGHT*render_scale_y
 
 		input_rect := sdl.FRect {
 			x = margs.x,
 			y = margs.y,
-			w = f32(WINDOW_WIDTH) - margs.x * 2,
-			h = INPUT_HEIGHT,
+			w = f32(render_width)-margs.x*2,
+			h = input_height,
 		}
 		sdl.SetRenderDrawColor(renderer, 42, 42, 42, 255)
 		sdl.RenderFillRect(renderer, &input_rect)
 
 		input_divider := sdl.FRect {
 			x = margs.x,
-			y = margs.y + INPUT_HEIGHT - 1,
-			w = f32(WINDOW_WIDTH) - margs.x * 2,
-			h = 1,
+			y = margs.y+input_height-render_scale_y,
+			w = f32(render_width)-margs.x*2,
+			h = render_scale_y,
 		}
 		sdl.SetRenderDrawColor(renderer, 80, 80, 80, 255)
 		sdl.RenderFillRect(renderer, &input_divider)
@@ -250,16 +258,16 @@ main_window :: proc(title: cstring) {
 			input_dirty = false
 		}
 
-		text_x := margs.x + 6
-		text_y := margs.y + 10
+		text_x := margs.x+6*render_scale_x
+		text_y := margs.y+10*render_scale_y
 		assert(ttf.DrawRendererText(input_text, text_x, text_y))
 
 		text_width, text_height: i32
 		assert(ttf.GetTextSize(input_text, &text_width, &text_height))
 		caret := sdl.FRect {
-			x = text_x + f32(text_width) + 1,
+			x = text_x+f32(text_width)+render_scale_x,
 			y = text_y,
-			w = 1,
+			w = render_scale_x,
 			h = f32(text_height),
 		}
 		sdl.SetRenderDrawColor(renderer, 235, 235, 235, 255)
