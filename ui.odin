@@ -259,7 +259,7 @@ window_backdrop_surface :: proc(
 }
 
 
-main_window :: proc(title: cstring) {
+main_window :: proc() {
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 
@@ -282,7 +282,7 @@ main_window :: proc(title: cstring) {
 	window_width := WINDOW_WIDTH + WINDOW_SHADOW_PADDING * 2
 	window_height := WINDOW_HEIGHT + WINDOW_SHADOW_PADDING * 2
 	window := sdl.CreateWindow(
-		title,
+		"Vima",
 		window_width,
 		window_height,
 		{.HIGH_PIXEL_DENSITY, .BORDERLESS, .TRANSPARENT},
@@ -335,18 +335,12 @@ main_window :: proc(title: cstring) {
 	assert(backdrop_texture != nil)
 	defer sdl.DestroyTexture(backdrop_texture)
 
-	font := ttf.OpenFont(
-		DEFAULT_FONT_PATH,
-		INPUT_FONT_SIZE * FONT_SIZE_SCALE * render_scale_y,
-	)
+	font := ttf.OpenFont(DEFAULT_FONT_PATH, INPUT_FONT_SIZE * FONT_SIZE_SCALE * render_scale_y)
 	assert(font != nil)
 	defer ttf.CloseFont(font)
 	font_height := ttf.GetFontHeight(font)
 	list_font_size := system_font_size() * FONT_SIZE_SCALE
-	list_name_font := ttf.OpenFont(
-		DEFAULT_FONT_PATH,
-		list_font_size * render_scale_y,
-	)
+	list_name_font := ttf.OpenFont(DEFAULT_FONT_PATH, list_font_size * render_scale_y)
 	assert(list_name_font != nil)
 	defer ttf.CloseFont(list_name_font)
 	list_name_height := ttf.GetFontHeight(list_name_font)
@@ -385,10 +379,12 @@ main_window :: proc(title: cstring) {
 		)
 		assert(application_description_texts[index] != nil)
 	}
+
 	defer {
 		for text in application_name_texts {
 			ttf.DestroyText(text)
 		}
+
 		for text in application_description_texts {
 			ttf.DestroyText(text)
 		}
@@ -437,6 +433,7 @@ main_window :: proc(title: cstring) {
 	list_height := shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
 	row_height := list_font_size * LIST_ROW_HEIGHT_RATIO * render_scale_y
 	visible_row_count := max(1, int(list_height / row_height))
+	row_height = list_height / f32(visible_row_count)
 	max_scroll_offset := max(0, len(DUMMY_APPLICATIONS) - visible_row_count)
 	list_clip := sdl.Rect {
 		x = i32(list_x),
@@ -477,25 +474,38 @@ main_window :: proc(title: cstring) {
 		for sdl.PollEvent(&e) {
 			#partial switch e.type {
 			case .KEY_DOWN:
-				if e.key.scancode == .ESCAPE {
+				#partial switch e.key.scancode {
+				case .ESCAPE:
 					running = false
-				} else if e.key.scancode == .UP {
+					break
+
+				case .UP:
 					selected_index = max(0, selected_index - 1)
-				} else if e.key.scancode == .DOWN {
+					break
+
+				case .DOWN:
 					selected_index = min(len(DUMMY_APPLICATIONS) - 1, selected_index + 1)
-				} else if e.key.scancode == .PAGEUP {
+					break
+
+				case .PAGEUP:
 					selected_index = max(0, selected_index - visible_row_count)
-				} else if e.key.scancode == .PAGEDOWN {
+					break
+
+				case .PAGEDOWN:
 					selected_index = min(
 						len(DUMMY_APPLICATIONS) - 1,
 						selected_index + visible_row_count,
 					)
-				} else if e.key.scancode == .BACKSPACE {
+					break
+
+				case .BACKSPACE:
 					_, _ = strings.pop_rune(&input)
 					input_dirty = true
 					caret_state.last_input_at = sdl.GetTicks()
 					caret_state.has_input_activity = true
+					break
 				}
+
 
 			case .TEXT_INPUT:
 				strings.write_string(&input, string(e.text.text))
@@ -521,8 +531,10 @@ main_window :: proc(title: cstring) {
 				if e.button.button == sdl.BUTTON_LEFT {
 					mouse_x := e.button.x * render_scale_x
 					mouse_y := e.button.y * render_scale_y
-					if mouse_x >= list_x && mouse_x < list_x + list_width &&
-					   mouse_y >= list_y && mouse_y < list_y + list_height {
+					if mouse_x >= list_x &&
+					   mouse_x < list_x + list_width &&
+					   mouse_y >= list_y &&
+					   mouse_y < list_y + list_height {
 						visible_index := int((mouse_y - list_y) / row_height)
 						clicked_index := scroll_offset + visible_index
 						if clicked_index < len(DUMMY_APPLICATIONS) &&
@@ -613,6 +625,7 @@ main_window :: proc(title: cstring) {
 				w = list_width - 20 * render_scale_x,
 				h = render_scale_y,
 			}
+
 			sdl.SetRenderDrawColor(
 				renderer,
 				separator_color.r,

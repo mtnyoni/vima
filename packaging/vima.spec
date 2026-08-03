@@ -2,7 +2,7 @@
 
 Name:           vima
 Version:        %{vima_version}
-Release:        1%{?dist}
+Release:        %{vima_release}%{?dist}
 Summary:        Fast graphical application launcher
 License:        LicenseRef-Proprietary
 
@@ -32,5 +32,5 @@ desktop-file-validate %{SOURCE1}
 %{_datadir}/applications/vima.desktop
 
 %changelog
-* Sun Aug 02 2026 Vima contributors <noreply@example.invalid> - %{vima_version}-1
+* Sun Aug 02 2026 Vima contributors <noreply@example.invalid> - %{vima_version}-%{vima_release}
 - Initial RPM package

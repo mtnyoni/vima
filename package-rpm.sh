@@ -3,13 +3,15 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-version="${1:-0.1.0}"
+package_version="${1:-0.1.0-3}"
 package_dir="$project_dir/build/packages"
 
-if [[ ! "$version" =~ ^[0-9]+([.][0-9]+)*$ ]]; then
-	echo "error: version must contain only numeric components, for example 0.1.0" >&2
+if [[ ! "$package_version" =~ ^([0-9]+([.][0-9]+)*)-([0-9]+)$ ]]; then
+	echo "error: version must use version-release format, for example 0.1.0-3" >&2
 	exit 2
 fi
+version="${BASH_REMATCH[1]}"
+release="${BASH_REMATCH[3]}"
 
 for command_name in rpmbuild desktop-file-validate; do
 	if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -40,6 +42,7 @@ install -m0644 "$project_dir/packaging/vima.spec" "$rpm_topdir/SPECS/vima.spec"
 rpmbuild \
 	--define "_topdir $rpm_topdir" \
 	--define "vima_version $version" \
+	--define "vima_release $release" \
 	-bb "$rpm_topdir/SPECS/vima.spec"
 
 mapfile -t built_packages < <(find "$rpm_topdir/RPMS" -type f -name 'vima-*.rpm' -print)

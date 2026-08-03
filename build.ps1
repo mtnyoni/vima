@@ -1,8 +1,8 @@
 param(
     [ValidateSet("Release", "Debug")]
     [string]$Mode = "Release",
-    [ValidatePattern("^[0-9]+(\.[0-9]+)*$")]
-    [string]$Version = "0.1.0",
+    [ValidatePattern("^[0-9]+(\.[0-9]+)*-[0-9]+$")]
+    [string]$Version = "0.1.0-3",
     [string]$SDL3Root = $env:SDL3_DIR,
     [string]$SDL3TtfRoot = $env:SDL3_TTF_DIR,
     [switch]$PortableOnly
