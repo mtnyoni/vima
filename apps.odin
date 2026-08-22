@@ -3,6 +3,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 
 Installed_App :: struct {
@@ -49,6 +50,9 @@ get_system_wide_apps :: proc() -> ([dynamic]Installed_App, App_Error) {
 		}
 	}
 
+	slice.sort_by(apps[:], proc(a: Installed_App, b: Installed_App) -> bool {
+		return a.name < b.name
+	})
 	return apps, {}
 }
 
@@ -217,6 +221,7 @@ search_apps :: proc(
 
 	return result
 }
+
 
 display_apps :: proc(apps: [dynamic]Installed_App) {
 	for app in apps {
