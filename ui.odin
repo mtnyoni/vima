@@ -2,6 +2,7 @@ package main
 
 import "core:c"
 import "core:fmt"
+import "core:math"
 import "core:mem"
 import "core:strings"
 
@@ -21,7 +22,7 @@ WINDOW_BORDER_WIDTH: i32 = 1
 WINDOW_SHADOW_PADDING: i32 = 12
 INPUT_HEIGHT: f32 = 36
 INPUT_RADIUS: i32 = 6
-INPUT_FONT_SIZE: f32 = 18
+INPUT_FONT_SIZE: f32 = 11
 FONT_SIZE_SCALE: f32 = 1.2
 LIST_HIGHLIGHT_RADIUS: i32 = 5
 LIST_DESCRIPTION_SIZE_RATIO :: 11.0 / 13.0
@@ -89,16 +90,17 @@ render_caret :: proc(
 	sdl.RenderFillRect(renderer, &caret)
 }
 
-create_text :: proc(
-	engine: ^ttf.TextEngine,
+create_colored_text :: proc(
+	text_engine: ^ttf.TextEngine,
 	font: ^ttf.Font,
 	value: cstring,
 	color: Color,
 ) -> ^ttf.Text {
-	text := ttf.CreateText(engine, font, value, c.size_t(len(string(value))))
+	text := ttf.CreateText(text_engine, font, value, c.size_t(len(value)))
 	if text == nil {
 		return nil
 	}
+
 	if !ttf.SetTextColor(text, color.r, color.g, color.b, color.a) {
 		ttf.DestroyText(text)
 		return nil
@@ -122,6 +124,23 @@ inside_rounded_rect :: proc(x, y, width, height, radius: i32) -> bool {
 	return dx * dx + dy * dy <= radius * radius
 }
 
+// signed distance from point to rounded-rect edge; negative = inside
+rounded_rect_sdf :: proc(x, y, width, height, radius: f32) -> f32 {
+	// distance from center, clamped into the "core" rect shrunk by radius
+	cx := width / 2
+	cy := height / 2
+	qx := abs(x - cx) - (cx - radius)
+	qy := abs(y - cy) - (cy - radius)
+	outside := math.sqrt(max(qx, 0) * max(qx, 0) + max(qy, 0) * max(qy, 0))
+	inside := min(max(qx, qy), 0)
+	return outside + inside - radius
+}
+
+coverage :: proc(dist: f32) -> f32 {
+	// smoothstep over ~1px band around the edge
+	return clamp(0.5 - dist, 0, 1)
+}
+
 rounded_window_border :: proc(
 	width, height, radius, border_width: i32,
 	color: Color,
@@ -138,20 +157,23 @@ rounded_window_border :: proc(
 
 	for y in 0 ..< height {
 		for x in 0 ..< width {
-			outer := inside_rounded_rect(x, y, width, height, radius)
-			inner := inside_rounded_rect(
-				x - border_width,
-				y - border_width,
-				width - border_width * 2,
-				height - border_width * 2,
-				inner_radius,
+			fx := f32(x) + 0.5
+			fy := f32(y) + 0.5
+
+			outer_d := rounded_rect_sdf(fx, fy, f32(width), f32(height), f32(radius))
+			inner_d := rounded_rect_sdf(
+				fx - f32(border_width),
+				fy - f32(border_width),
+				f32(width - border_width * 2),
+				f32(height - border_width * 2),
+				f32(inner_radius),
 			)
 
-			alpha: u8 = 0
-			if outer && !inner {
-				alpha = 255
-			}
+			outer_cov := coverage(outer_d)
+			inner_cov := coverage(inner_d)
+			ring_cov := clamp(outer_cov - inner_cov, 0, 1)
 
+			alpha := u8(ring_cov * 255)
 			if !sdl.WriteSurfacePixel(border, x, y, color.r, color.g, color.b, alpha) {
 				sdl.DestroySurface(border)
 				return nil
@@ -160,6 +182,16 @@ rounded_window_border :: proc(
 	}
 
 	return border
+}
+
+// standard "src over dst" alpha compositing
+composite_over :: proc(src: [4]f32, dst: [4]f32) -> [4]f32 {
+	out_a := src.a + dst.a * (1 - src.a)
+	if out_a <= 0 {
+		return {0, 0, 0, 0}
+	}
+	out_rgb := (src.rgb * src.a + dst.rgb * dst.a * (1 - src.a)) / out_a
+	return {out_rgb.r, out_rgb.g, out_rgb.b, out_a}
 }
 
 rounded_input_surface :: proc(
@@ -171,34 +203,53 @@ rounded_input_surface :: proc(
 	if surface == nil {
 		return nil
 	}
-
 	inner_radius := radius - border_width
 	if inner_radius < 0 {
 		inner_radius = 0
 	}
 
+	bg := [4]f32 {
+		f32(background.r) / 255,
+		f32(background.g) / 255,
+		f32(background.b) / 255,
+		f32(background.a) / 255,
+	}
+	bd := [4]f32 {
+		f32(border_color.r) / 255,
+		f32(border_color.g) / 255,
+		f32(border_color.b) / 255,
+		f32(border_color.a) / 255,
+	}
+
 	for y in 0 ..< height {
 		for x in 0 ..< width {
-			outer := inside_rounded_rect(x, y, width, height, radius)
-			inner := inside_rounded_rect(
-				x - border_width,
-				y - border_width,
-				width - border_width * 2,
-				height - border_width * 2,
-				inner_radius,
+			fx := f32(x) + 0.5
+			fy := f32(y) + 0.5
+
+			outer_d := rounded_rect_sdf(fx, fy, f32(width), f32(height), f32(radius))
+			inner_d := rounded_rect_sdf(
+				fx - f32(border_width),
+				fy - f32(border_width),
+				f32(width - border_width * 2),
+				f32(height - border_width * 2),
+				f32(inner_radius),
 			)
 
-			r, g, b, a: u8
-			switch {
-			case !outer:
-				r, g, b, a = 0, 0, 0, 0
+			outer_cov := coverage(outer_d)
+			inner_cov := coverage(inner_d)
 
-			case !inner:
-				r, g, b, a = border_color.r, border_color.g, border_color.b, border_color.a
+			// layer 1: border, masked by outer shape, over transparent
+			border_layer := [4]f32{bd.r, bd.g, bd.b, bd.a * outer_cov}
+			result := composite_over(border_layer, {0, 0, 0, 0})
 
-			case:
-				r, g, b, a = background.r, background.g, background.b, background.a
-			}
+			// layer 2: background, masked by inner shape, over border layer
+			bg_layer := [4]f32{bg.r, bg.g, bg.b, bg.a * inner_cov}
+			result = composite_over(bg_layer, result)
+
+			r := u8(clamp(result.r, 0, 1) * 255)
+			g := u8(clamp(result.g, 0, 1) * 255)
+			b := u8(clamp(result.b, 0, 1) * 255)
+			a := u8(clamp(result.a, 0, 1) * 255)
 
 			if !sdl.WriteSurfacePixel(surface, x, y, r, g, b, a) {
 				sdl.DestroySurface(surface)
@@ -206,7 +257,6 @@ rounded_input_surface :: proc(
 			}
 		}
 	}
-
 	return surface
 }
 
@@ -262,7 +312,6 @@ window_backdrop_surface :: proc(
 main_window :: proc() {
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
-
 	defer {
 		for _, leak in track.allocation_map {
 			fmt.printf("%v leaked %v bytes\n", leak.location, leak.size)
@@ -270,7 +319,6 @@ main_window :: proc() {
 
 		mem.tracking_allocator_destroy(&track)
 	}
-
 	context.allocator = mem.tracking_allocator(&track)
 
 	assert(sdl.Init(sdl.INIT_VIDEO))
@@ -285,7 +333,14 @@ main_window :: proc() {
 		"Vima",
 		window_width,
 		window_height,
-		{.HIGH_PIXEL_DENSITY, .BORDERLESS, .TRANSPARENT},
+		{
+			.HIGH_PIXEL_DENSITY,
+			.BORDERLESS,
+			.TRANSPARENT,
+			.ALWAYS_ON_TOP,
+			.INPUT_FOCUS,
+			.MOUSE_FOCUS,
+		},
 	)
 	assert(window != nil)
 	defer sdl.DestroyWindow(window)
@@ -364,14 +419,14 @@ main_window :: proc() {
 	application_name_texts: [len(DUMMY_APPLICATIONS)]^ttf.Text
 	application_description_texts: [len(DUMMY_APPLICATIONS)]^ttf.Text
 	for application, index in DUMMY_APPLICATIONS {
-		application_name_texts[index] = create_text(
+		application_name_texts[index] = create_colored_text(
 			text_engine,
 			list_name_font,
 			application.name,
 			text_color,
 		)
 		assert(application_name_texts[index] != nil)
-		application_description_texts[index] = create_text(
+		application_description_texts[index] = create_colored_text(
 			text_engine,
 			list_description_font,
 			application.description,
@@ -390,6 +445,7 @@ main_window :: proc() {
 		}
 	}
 
+
 	border_surface := rounded_window_border(
 		content_width,
 		content_height,
@@ -402,6 +458,13 @@ main_window :: proc() {
 	sdl.DestroySurface(border_surface)
 	assert(border_texture != nil)
 	defer sdl.DestroyTexture(border_texture)
+
+	rect := sdl.FRect {
+		x = shadow_padding_x,
+		y = shadow_padding_y,
+		w = f32(content_width),
+		h = f32(content_height),
+	}
 
 	input_x := shadow_padding_x + 4 * render_scale_x
 	input_y := shadow_padding_y + 4 * render_scale_y
@@ -543,6 +606,9 @@ main_window :: proc() {
 						}
 					}
 				}
+
+			case .WINDOW_FOCUS_LOST:
+				running = false
 
 			case .QUIT:
 				running = false
