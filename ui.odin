@@ -554,10 +554,16 @@ main_window :: proc() {
 				text_color,
 			)
 			assert(application_name_texts[index] != nil)
+			list_subtitle: cstring = ""
+			if application.generic_name != nil && len(application.generic_name) > 0 {
+				list_subtitle = application.generic_name
+			} else if application.description != nil {
+				list_subtitle = application.description
+			}
 			application_description_texts[index] = create_colored_text(
 				text_engine,
 				list_description_font,
-				application.description,
+				list_subtitle,
 				subtext_color,
 			)
 			assert(application_description_texts[index] != nil)

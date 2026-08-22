@@ -7,10 +7,11 @@ import "core:slice"
 import "core:strings"
 
 Installed_App :: struct {
-	name:        cstring,
-	exec:        cstring,
-	icon:        cstring,
-	description: cstring,
+	name:         cstring,
+	generic_name: cstring,
+	exec:         cstring,
+	icon:         cstring,
+	description:  cstring,
 }
 
 App_Error :: struct {
@@ -105,6 +106,10 @@ parse_desktop_file :: proc(file_path: string) -> Installed_App {
 			if app.description == nil {
 				app.description = strings.clone_to_cstring(value, context.allocator)
 			}
+		case "GenericName":
+			if app.generic_name == nil {
+				app.generic_name = strings.clone_to_cstring(value, context.allocator)
+			}
 		}
 	}
 
@@ -116,12 +121,19 @@ destroy_installed_apps :: proc(apps: [dynamic]Installed_App) {
 		if app.name != nil {
 			delete(app.name)
 		}
+
 		if app.exec != nil {
 			delete(app.exec)
 		}
+
+		if app.generic_name != nil {
+			delete(app.generic_name)
+		}
+
 		if app.icon != nil {
 			delete(app.icon)
 		}
+
 		if app.description != nil {
 			delete(app.description)
 		}
