@@ -421,7 +421,11 @@ main_window :: proc() {
 		fmt.println(err.message)
 		return
 	}
+
+	fmt.println("Apps:")
+	display_apps(apps)
 	defer destroy_installed_apps(apps)
+
 	application_name_texts := make([]^ttf.Text, len(apps))
 	defer delete(application_name_texts)
 	application_description_texts := make([]^ttf.Text, len(apps))
@@ -550,6 +554,19 @@ main_window :: proc() {
 					running = false
 					break
 
+				case .RETURN, .KP_ENTER:
+					if len(apps) > 0 &&
+					   selected_index >= 0 &&
+					   selected_index < len(apps) &&
+					   apps[selected_index].exec != nil {
+						if launch_app(string(apps[selected_index].exec)) {
+							running = false
+						} else {
+							fmt.eprintln("Failed to launch ", apps[selected_index].name)
+						}
+					}
+					break
+
 				case .UP:
 					selected_index = max(0, selected_index - 1)
 					break
@@ -602,6 +619,13 @@ main_window :: proc() {
 						clicked_index := scroll_offset + visible_index
 						if clicked_index < len(apps) && visible_index < visible_row_count {
 							selected_index = clicked_index
+							if apps[clicked_index].exec != nil {
+								if launch_app(string(apps[clicked_index].exec)) {
+									running = false
+								} else {
+									fmt.eprintln("Failed to launch ", apps[clicked_index].name)
+								}
+							}
 						}
 					}
 				}
@@ -611,6 +635,10 @@ main_window :: proc() {
 
 			case .QUIT:
 				running = false
+			}
+
+			if !running {
+				break
 			}
 		}
 

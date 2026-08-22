@@ -89,7 +89,7 @@ parse_desktop_file :: proc(file_path: string) -> Installed_App {
 
 		case "Exec":
 			if app.exec == nil {
-				app.exec = strings.clone_to_cstring(value, context.allocator)
+				app.exec = clean_exec_string(value)
 			}
 
 		case "Icon":
@@ -124,4 +124,79 @@ destroy_installed_apps :: proc(apps: [dynamic]Installed_App) {
 	}
 
 	delete(apps)
+}
+
+clean_exec_string :: proc(exec: string) -> cstring {
+	tokens := strings.split(exec, " ")
+	defer delete(tokens)
+
+	sb := strings.builder_make()
+	defer strings.builder_destroy(&sb)
+
+	first := true
+	for tok in tokens {
+		if tok == "%f" ||
+		   tok == "%F" ||
+		   tok == "%u" ||
+		   tok == "%U" ||
+		   tok == "%i" ||
+		   tok == "%c" ||
+		   tok == "%k" ||
+		   tok == "%v" ||
+		   tok == "%m" {
+			continue
+		}
+		if !first {
+			strings.write_byte(&sb, ' ')
+		}
+		strings.write_string(&sb, tok)
+		first = false
+	}
+
+	temp := strings.clone(strings.to_string(sb), context.allocator)
+	defer delete(temp)
+
+	return strings.clone_to_cstring(temp, context.allocator)
+}
+
+exec_to_argv :: proc(exec: string) -> []string {
+	parts := strings.split(exec, " ")
+	// parts[0] is the binary, parts[1:] are args — clone since `parts` holds
+	// substrings into `cleaned`, which we're about to free
+	argv := make([]string, len(parts))
+	for p, i in parts {
+		argv[i] = strings.clone(p)
+	}
+
+	delete(parts)
+	return argv
+}
+
+launch_app :: proc(exec: string) -> bool {
+	argv := exec_to_argv(exec)
+	defer {
+		for a in argv do delete(a)
+		delete(argv)
+	}
+
+	if len(argv) == 0 {
+		return false
+	}
+
+	desc := os.Process_Desc {
+		command = argv,
+	}
+
+	_, err := os.process_start(desc)
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
+display_apps :: proc(apps: [dynamic]Installed_App) {
+	for app in apps {
+		fmt.printf("%s \t %s\n", app.name, app.exec)
+	}
 }
