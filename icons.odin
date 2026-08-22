@@ -32,6 +32,7 @@ active_icon_theme :: proc(allocator := context.allocator) -> string {
 			in_icons_section = line == "[Icons]"
 			continue
 		}
+
 		if in_icons_section && strings.starts_with(line, "Theme=") {
 			theme := strings.trim(strings.trim_prefix(line, "Theme="), " \t\r\n")
 			if len(theme) > 0 {
@@ -72,6 +73,7 @@ resolve_icon_path :: proc(
 	if !has_data_dirs || len(data_dirs_value) == 0 {
 		data_dirs_value = "/usr/local/share:/usr/share"
 	}
+
 	data_dirs_for_roots := data_dirs_value
 	for data_dir in strings.split_iterator(&data_dirs_for_roots, ":") {
 		if len(data_dir) > 0 {
@@ -113,8 +115,10 @@ resolve_icon_path :: proc(
 		"mimetypes/32",
 		"32x32/mimetypes",
 	}
+
 	extensions := [?]string{".png", ".svg", ".svgz", ".xpm"}
-	has_extension := strings.ends_with(name, ".png") ||
+	has_extension :=
+		strings.ends_with(name, ".png") ||
 		strings.ends_with(name, ".svg") ||
 		strings.ends_with(name, ".svgz") ||
 		strings.ends_with(name, ".xpm")
@@ -123,15 +127,18 @@ resolve_icon_path :: proc(
 		if len(theme_name) == 0 {
 			continue
 		}
+
 		for root in roots {
 			for layout in layouts {
 				base := strings.concatenate(
 					{root, "/", theme_name, "/", layout, "/", name},
 					context.temp_allocator,
 				)
+
 				if has_extension && os.exists(base) {
 					return strings.clone_to_cstring(base, allocator)
 				}
+
 				if !has_extension {
 					for extension in extensions {
 						candidate := strings.concatenate({base, extension}, context.temp_allocator)
@@ -150,10 +157,12 @@ resolve_icon_path :: proc(
 		if len(data_dir) == 0 {
 			continue
 		}
+
 		base := strings.concatenate({data_dir, "/pixmaps/", name}, context.temp_allocator)
 		if has_extension && os.exists(base) {
 			return strings.clone_to_cstring(base, allocator)
 		}
+
 		if !has_extension {
 			for extension in extensions {
 				candidate := strings.concatenate({base, extension}, context.temp_allocator)

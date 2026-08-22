@@ -331,6 +331,7 @@ main_window :: proc() {
 			if vima_layer_shell_supported() != 0 {
 				driver_order = "wayland,x11"
 			}
+
 			_ = sdl.SetHintWithPriority(sdl.HINT_VIDEO_DRIVER, driver_order, .DEFAULT)
 		}
 	}
@@ -352,6 +353,7 @@ main_window :: proc() {
 		if display_scale <= 0 {
 			display_scale = sdl.GetDisplayContentScale(sdl.GetPrimaryDisplay())
 		}
+
 		if display_scale <= 0 {
 			display_scale = 1
 		}
@@ -377,13 +379,54 @@ main_window :: proc() {
 			properties := sdl.CreateProperties()
 			assert(properties != 0)
 			assert(sdl.SetStringProperty(properties, sdl.PROP_WINDOW_CREATE_TITLE_STRING, "Vima"))
-			assert(sdl.SetNumberProperty(properties, sdl.PROP_WINDOW_CREATE_WIDTH_NUMBER, i64(window_width)))
-			assert(sdl.SetNumberProperty(properties, sdl.PROP_WINDOW_CREATE_HEIGHT_NUMBER, i64(window_height)))
+			assert(
+				sdl.SetNumberProperty(
+					properties,
+					sdl.PROP_WINDOW_CREATE_WIDTH_NUMBER,
+					i64(window_width),
+				),
+			)
+
+			assert(
+				sdl.SetNumberProperty(
+					properties,
+					sdl.PROP_WINDOW_CREATE_HEIGHT_NUMBER,
+					i64(window_height),
+				),
+			)
+
 			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true))
-			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true))
-			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN, true))
-			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN, true))
-			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN, true))
+			assert(
+				sdl.SetBooleanProperty(
+					properties,
+					sdl.PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN,
+					true,
+				),
+			)
+
+			assert(
+				sdl.SetBooleanProperty(
+					properties,
+					sdl.PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN,
+					true,
+				),
+			)
+			assert(
+				sdl.SetBooleanProperty(
+					properties,
+					sdl.PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN,
+					true,
+				),
+			)
+
+			assert(
+				sdl.SetBooleanProperty(
+					properties,
+					sdl.PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN,
+					true,
+				),
+			)
+
 			window = sdl.CreateWindowWithProperties(properties)
 			sdl.DestroyProperties(properties)
 		} else {
@@ -414,16 +457,19 @@ main_window :: proc() {
 					sdl.PROP_WINDOW_WAYLAND_DISPLAY_POINTER,
 					nil,
 				)
+
 				surface := sdl.GetPointerProperty(
 					window_properties,
 					sdl.PROP_WINDOW_WAYLAND_SURFACE_POINTER,
 					nil,
 				)
+
 				layer_shell_state = vima_layer_shell_attach(display, surface)
 				if layer_shell_state == nil {
 					fmt.eprintln("Unable to create the Wayland layer-shell surface")
 					return
 				}
+
 				window_width = i32(vima_layer_shell_width(layer_shell_state))
 				window_height = i32(vima_layer_shell_height(layer_shell_state))
 				assert(sdl.SetWindowSize(window, window_width, window_height))
@@ -469,6 +515,7 @@ main_window :: proc() {
 			panel_width = min(panel_width, render_width)
 			panel_height = min(panel_height, render_height)
 		}
+
 		panel_x := f32(render_width - panel_width) / 2
 		panel_y := f32(render_height - panel_height) / 2
 		panel_rect := sdl.FRect {
@@ -477,6 +524,7 @@ main_window :: proc() {
 			w = f32(panel_width),
 			h = f32(panel_height),
 		}
+
 		// UI scale controls physical content size. Pixel scale only converts
 		// window/input coordinates into renderer coordinates.
 		render_scale_x := f32(panel_width) / f32(base_window_width)
@@ -553,6 +601,7 @@ main_window :: proc() {
 			if icon_path == nil {
 				continue
 			}
+
 			application_icon_textures[index] = image.LoadTexture(renderer, icon_path)
 			delete(icon_path)
 			if application_icon_textures[index] != nil {
@@ -575,6 +624,7 @@ main_window :: proc() {
 					sdl.DestroyTexture(texture)
 				}
 			}
+
 			if fallback_icon_texture != nil {
 				sdl.DestroyTexture(fallback_icon_texture)
 			}
@@ -598,6 +648,7 @@ main_window :: proc() {
 			} else if application.description != nil {
 				list_subtitle = application.description
 			}
+
 			application_description_texts[index] = create_colored_text(
 				text_engine,
 				list_description_font,
@@ -670,7 +721,8 @@ main_window :: proc() {
 		list_x := input_x
 		list_y := input_y + input_height + 4 * render_scale_y
 		list_width := input_width
-		list_height := panel_y + shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
+		list_height :=
+			panel_y + shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
 		row_height := list_font_size * LIST_ROW_HEIGHT_RATIO * render_scale_y
 		visible_row_count := max(1, int(list_height / row_height))
 		row_height = list_height / f32(visible_row_count)
@@ -757,10 +809,7 @@ main_window :: proc() {
 
 					case .DOWN:
 						if len(filtered_app_indices) > 0 {
-							selected_index = min(
-								len(filtered_app_indices) - 1,
-								selected_index + 1,
-							)
+							selected_index = min(len(filtered_app_indices) - 1, selected_index + 1)
 						}
 						break
 
@@ -814,9 +863,9 @@ main_window :: proc() {
 						mouse_y := e.button.y * pixel_scale_y
 						if layer_shell_mode &&
 						   (mouse_x < panel_x ||
-							   mouse_x >= panel_x + f32(panel_width) ||
-							   mouse_y < panel_y ||
-							   mouse_y >= panel_y + f32(panel_height)) {
+								   mouse_x >= panel_x + f32(panel_width) ||
+								   mouse_y < panel_y ||
+								   mouse_y >= panel_y + f32(panel_height)) {
 							running = false
 						} else if mouse_x >= list_x &&
 						   mouse_x < list_x + list_width &&
@@ -874,20 +923,17 @@ main_window :: proc() {
 					running = false
 				}
 
-			if !running {
-				break
+				if !running {
+					break
+				}
 			}
-		}
 
 			if search_dirty {
 				delete(filtered_app_indices)
 				filtered_app_indices = search_apps(apps[:], strings.to_string(input))
 				selected_index = 0
 				scroll_offset = 0
-				max_scroll_offset = max(
-					0,
-					len(filtered_app_indices) - visible_row_count,
-				)
+				max_scroll_offset = max(0, len(filtered_app_indices) - visible_row_count)
 				search_dirty = false
 			}
 
@@ -928,10 +974,7 @@ main_window :: proc() {
 			)
 
 			assert(sdl.SetRenderClipRect(renderer, &list_clip))
-			visible_end := min(
-				len(filtered_app_indices),
-				scroll_offset + visible_row_count,
-			)
+			visible_end := min(len(filtered_app_indices), scroll_offset + visible_row_count)
 			for application_index in scroll_offset ..< visible_end {
 				source_index := filtered_app_indices[application_index]
 				visible_index := application_index - scroll_offset
@@ -949,9 +992,7 @@ main_window :: proc() {
 
 				row_text_x := list_x + 10 * render_scale_x
 				name_width: i32
-				assert(
-					ttf.GetTextSize(application_name_texts[source_index], &name_width, nil),
-				)
+				assert(ttf.GetTextSize(application_name_texts[source_index], &name_width, nil))
 				assert(
 					ttf.DrawRendererText(
 						application_name_texts[source_index],

@@ -106,6 +106,7 @@ parse_desktop_file :: proc(file_path: string) -> Installed_App {
 			if app.description == nil {
 				app.description = strings.clone_to_cstring(value, context.allocator)
 			}
+
 		case "GenericName":
 			if app.generic_name == nil {
 				app.generic_name = strings.clone_to_cstring(value, context.allocator)
@@ -150,22 +151,24 @@ clean_exec_string :: proc(exec: string) -> cstring {
 	defer strings.builder_destroy(&sb)
 
 	first := true
-	for tok in tokens {
-		if tok == "%f" ||
-		   tok == "%F" ||
-		   tok == "%u" ||
-		   tok == "%U" ||
-		   tok == "%i" ||
-		   tok == "%c" ||
-		   tok == "%k" ||
-		   tok == "%v" ||
-		   tok == "%m" {
+	for token in tokens {
+		if token == "%f" ||
+		   token == "%F" ||
+		   token == "%u" ||
+		   token == "%U" ||
+		   token == "%i" ||
+		   token == "%c" ||
+		   token == "%k" ||
+		   token == "%v" ||
+		   token == "%m" {
 			continue
 		}
+
 		if !first {
 			strings.write_byte(&sb, ' ')
 		}
-		strings.write_string(&sb, tok)
+
+		strings.write_string(&sb, token)
 		first = false
 	}
 
@@ -232,11 +235,4 @@ search_apps :: proc(
 	}
 
 	return result
-}
-
-
-display_apps :: proc(apps: [dynamic]Installed_App) {
-	for app in apps {
-		fmt.printf("%s \t %s\n", app.name, app.exec)
-	}
 }
