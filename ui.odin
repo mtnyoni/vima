@@ -416,9 +416,17 @@ main_window :: proc() {
 	defer ttf.DestroyText(input_text)
 	assert(ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a))
 
-	application_name_texts: [len(DUMMY_APPLICATIONS)]^ttf.Text
-	application_description_texts: [len(DUMMY_APPLICATIONS)]^ttf.Text
-	for application, index in DUMMY_APPLICATIONS {
+	apps, err := get_system_wide_apps()
+	if err.message != "" {
+		fmt.println(err.message)
+		return
+	}
+	defer destroy_installed_apps(apps)
+	application_name_texts := make([]^ttf.Text, len(apps))
+	defer delete(application_name_texts)
+	application_description_texts := make([]^ttf.Text, len(apps))
+	defer delete(application_description_texts)
+	for application, index in apps {
 		application_name_texts[index] = create_colored_text(
 			text_engine,
 			list_name_font,
@@ -497,7 +505,7 @@ main_window :: proc() {
 	row_height := list_font_size * LIST_ROW_HEIGHT_RATIO * render_scale_y
 	visible_row_count := max(1, int(list_height / row_height))
 	row_height = list_height / f32(visible_row_count)
-	max_scroll_offset := max(0, len(DUMMY_APPLICATIONS) - visible_row_count)
+	max_scroll_offset := max(0, len(apps) - visible_row_count)
 	list_clip := sdl.Rect {
 		x = i32(list_x),
 		y = i32(list_y),
@@ -547,7 +555,7 @@ main_window :: proc() {
 					break
 
 				case .DOWN:
-					selected_index = min(len(DUMMY_APPLICATIONS) - 1, selected_index + 1)
+					selected_index = min(len(apps) - 1, selected_index + 1)
 					break
 
 				case .PAGEUP:
@@ -555,10 +563,7 @@ main_window :: proc() {
 					break
 
 				case .PAGEDOWN:
-					selected_index = min(
-						len(DUMMY_APPLICATIONS) - 1,
-						selected_index + visible_row_count,
-					)
+					selected_index = min(len(apps) - 1, selected_index + visible_row_count)
 					break
 
 				case .BACKSPACE:
@@ -568,7 +573,6 @@ main_window :: proc() {
 					caret_state.has_input_activity = true
 					break
 				}
-
 
 			case .TEXT_INPUT:
 				strings.write_string(&input, string(e.text.text))
@@ -582,11 +586,7 @@ main_window :: proc() {
 				   (last_wheel_scroll_at == 0 ||
 						   now - last_wheel_scroll_at >= WHEEL_SCROLL_INTERVAL) {
 					direction := -1 if e.wheel.y > 0 else 1
-					selected_index = clamp(
-						selected_index + direction,
-						0,
-						len(DUMMY_APPLICATIONS) - 1,
-					)
+					selected_index = clamp(selected_index + direction, 0, len(apps) - 1)
 					last_wheel_scroll_at = now
 				}
 
@@ -600,8 +600,7 @@ main_window :: proc() {
 					   mouse_y < list_y + list_height {
 						visible_index := int((mouse_y - list_y) / row_height)
 						clicked_index := scroll_offset + visible_index
-						if clicked_index < len(DUMMY_APPLICATIONS) &&
-						   visible_index < visible_row_count {
+						if clicked_index < len(apps) && visible_index < visible_row_count {
 							selected_index = clicked_index
 						}
 					}
@@ -652,7 +651,7 @@ main_window :: proc() {
 		)
 
 		assert(sdl.SetRenderClipRect(renderer, &list_clip))
-		visible_end := min(len(DUMMY_APPLICATIONS), scroll_offset + visible_row_count)
+		visible_end := min(len(apps), scroll_offset + visible_row_count)
 		for application_index in scroll_offset ..< visible_end {
 			visible_index := application_index - scroll_offset
 			row_y := list_y + f32(visible_index) * row_height

@@ -1,33 +1,127 @@
 package main
 
-Application :: struct {
+import "base:runtime"
+import "core:fmt"
+import "core:os"
+import "core:strings"
+
+Installed_App :: struct {
 	name:        cstring,
-	executable:  cstring,
+	exec:        cstring,
 	icon:        cstring,
-	desktop_id:  cstring,
 	description: cstring,
-	keywords:    cstring,
 }
 
-DUMMY_APPLICATIONS :: [?]Application {
-	{"Firefox", "firefox", "firefox", "firefox.desktop", "Browse the web", "browser web internet"},
-	{"Konsole", "konsole", "utilities-terminal", "org.kde.konsole.desktop", "Open a terminal", "terminal shell command"},
-	{"Dolphin", "dolphin", "system-file-manager", "org.kde.dolphin.desktop", "Browse files and folders", "files folders manager"},
-	{"Kate", "kate", "kate", "org.kde.kate.desktop", "Edit text and source code", "editor text code"},
-	{"System Settings", "systemsettings", "preferences-system", "systemsettings.desktop", "Configure KDE Plasma", "settings preferences plasma"},
-	{"Discover", "plasma-discover", "plasmadiscover", "org.kde.discover.desktop", "Install and update software", "software apps packages"},
-	{"Spectacle", "spectacle", "spectacle", "org.kde.spectacle.desktop", "Capture screenshots", "screenshot capture screen"},
-	{"Okular", "okular", "okular", "org.kde.okular.desktop", "Read documents and PDFs", "pdf document reader"},
-	{"Gwenview", "gwenview", "gwenview", "org.kde.gwenview.desktop", "View and organize images", "image photo viewer"},
-	{"Elisa", "elisa", "elisa", "org.kde.elisa.desktop", "Listen to music", "music audio player"},
-	{"KCalc", "kcalc", "accessories-calculator", "org.kde.kcalc.desktop", "Perform calculations", "calculator math"},
-	{"KWrite", "kwrite", "kwrite", "org.kde.kwrite.desktop", "Edit plain text", "editor text notes"},
-	{"Ark", "ark", "utilities-file-archiver", "org.kde.ark.desktop", "Manage compressed archives", "archive zip tar"},
-	{"KRunner", "krunner", "system-run", "org.kde.krunner.desktop", "Search and run commands", "launcher search command"},
-	{"LibreOffice Writer", "libreoffice --writer", "libreoffice-writer", "libreoffice-writer.desktop", "Create and edit documents", "office document writer"},
-	{"VLC", "vlc", "vlc", "vlc.desktop", "Play videos and music", "video media audio player"},
-	{"Discord", "discord", "discord", "discord.desktop", "Chat with communities", "chat voice messaging"},
-	{"Steam", "steam", "steam", "steam.desktop", "Browse and play games", "games store library"},
-	{"Visual Studio Code", "code", "visual-studio-code", "code.desktop", "Edit and debug source code", "editor development code"},
-	{"Obsidian", "obsidian", "obsidian", "obsidian.desktop", "Write and connect notes", "notes markdown knowledge"},
+App_Error :: struct {
+	message: string,
+}
+
+get_system_wide_apps :: proc() -> ([dynamic]Installed_App, App_Error) {
+	_temp_guard, _ := runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+
+	value, found := os.lookup_env("XDG_DATA_DIRS", context.temp_allocator)
+	if !found {
+		return {}, App_Error{message = "XDG_DATA_DIRS not found"}
+	}
+
+	dirs := strings.split(value, ":", context.temp_allocator)
+
+	apps_dirs := make([]string, len(dirs), context.temp_allocator)
+	for dir, i in dirs {
+		apps_dirs[i] = strings.concatenate({dir, "/applications"}, context.temp_allocator)
+	}
+
+	apps := make([dynamic]Installed_App, context.allocator)
+	for dir, _ in apps_dirs {
+		files, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+		if err != nil {
+			continue
+		}
+
+
+		for file, _ in files {
+			if !strings.ends_with(file.name, ".desktop") {
+				continue
+			}
+
+			app := parse_desktop_file(file.fullpath)
+			append(&apps, app)
+		}
+	}
+
+	return apps, {}
+}
+
+
+parse_desktop_file :: proc(file_path: string) -> Installed_App {
+	data, err := os.read_entire_file_from_path(file_path, context.temp_allocator)
+	if err != nil {
+		return Installed_App{}
+	}
+
+	content := string(data)
+	lines := strings.split_lines(content, context.temp_allocator)
+
+	app := Installed_App{}
+	for raw_line in lines {
+		line := strings.trim(raw_line, " \t\r\n")
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+
+		if strings.contains(line, "[Desktop Entry]") {
+			continue
+		}
+
+		eq_index := strings.index(line, "=")
+		if eq_index == -1 {
+			continue
+		}
+
+		key := strings.trim(line[:eq_index], " \t\r\n")
+		value := strings.trim(line[eq_index + 1:], " \t\r\n")
+
+		switch key {
+		case "Name":
+			if app.name == nil {
+				app.name = strings.clone_to_cstring(value, context.allocator)
+			}
+
+		case "Exec":
+			if app.exec == nil {
+				app.exec = strings.clone_to_cstring(value, context.allocator)
+			}
+
+		case "Icon":
+			if app.icon == nil {
+				app.icon = strings.clone_to_cstring(value, context.allocator)
+			}
+
+		case "Comment":
+			if app.description == nil {
+				app.description = strings.clone_to_cstring(value, context.allocator)
+			}
+		}
+	}
+
+	return app
+}
+
+destroy_installed_apps :: proc(apps: [dynamic]Installed_App) {
+	for app in apps {
+		if app.name != nil {
+			delete(app.name)
+		}
+		if app.exec != nil {
+			delete(app.exec)
+		}
+		if app.icon != nil {
+			delete(app.icon)
+		}
+		if app.description != nil {
+			delete(app.description)
+		}
+	}
+
+	delete(apps)
 }
