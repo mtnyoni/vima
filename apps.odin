@@ -195,6 +195,29 @@ launch_app :: proc(exec: string) -> bool {
 	return true
 }
 
+search_apps :: proc(
+	apps: []Installed_App,
+	query: string,
+	allocator := context.allocator,
+) -> [dynamic]int {
+	_temp_guard, _ := runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	result := make([dynamic]int, 0, len(apps), allocator)
+	lower_query := strings.to_lower(query, context.temp_allocator)
+
+	for app, index in apps {
+		if app.name == nil {
+			continue
+		}
+
+		lower_name := strings.to_lower(string(app.name), context.temp_allocator)
+		if strings.contains(lower_name, lower_query) {
+			append(&result, index)
+		}
+	}
+
+	return result
+}
+
 display_apps :: proc(apps: [dynamic]Installed_App) {
 	for app in apps {
 		fmt.printf("%s \t %s\n", app.name, app.exec)

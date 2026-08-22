@@ -492,6 +492,11 @@ main_window :: proc() {
 			}
 		}
 
+		filtered_app_indices := search_apps(apps[:], "")
+		defer {
+			delete(filtered_app_indices)
+		}
+
 
 		border_surface := rounded_window_border(
 			content_width,
@@ -544,7 +549,7 @@ main_window :: proc() {
 		row_height := list_font_size * LIST_ROW_HEIGHT_RATIO * render_scale_y
 		visible_row_count := max(1, int(list_height / row_height))
 		row_height = list_height / f32(visible_row_count)
-		max_scroll_offset := max(0, len(apps) - visible_row_count)
+		max_scroll_offset := max(0, len(filtered_app_indices) - visible_row_count)
 		list_clip := sdl.Rect {
 			x = i32(list_x),
 			y = i32(list_y),
@@ -573,6 +578,7 @@ main_window :: proc() {
 		defer _ = sdl.StopTextInput(window)
 
 		input_dirty := true
+		search_dirty := false
 		caret_state: Caret_State
 		selected_index := 0
 		scroll_offset := 0
@@ -592,14 +598,15 @@ main_window :: proc() {
 						break
 
 					case .RETURN, .KP_ENTER:
-						if len(apps) > 0 &&
+						if len(filtered_app_indices) > 0 &&
 						   selected_index >= 0 &&
-						   selected_index < len(apps) &&
-						   apps[selected_index].exec != nil {
-							if launch_app(string(apps[selected_index].exec)) {
+						   selected_index < len(filtered_app_indices) {
+							app_index := filtered_app_indices[selected_index]
+							if apps[app_index].exec != nil &&
+							   launch_app(string(apps[app_index].exec)) {
 								running = false
-							} else {
-								fmt.eprintln("Failed to launch ", apps[selected_index].name)
+							} else if apps[app_index].exec != nil {
+								fmt.eprintln("Failed to launch ", apps[app_index].name)
 							}
 						}
 						break
@@ -609,7 +616,12 @@ main_window :: proc() {
 						break
 
 					case .DOWN:
-						selected_index = min(len(apps) - 1, selected_index + 1)
+						if len(filtered_app_indices) > 0 {
+							selected_index = min(
+								len(filtered_app_indices) - 1,
+								selected_index + 1,
+							)
+						}
 						break
 
 					case .PAGEUP:
@@ -617,12 +629,18 @@ main_window :: proc() {
 						break
 
 					case .PAGEDOWN:
-						selected_index = min(len(apps) - 1, selected_index + visible_row_count)
+						if len(filtered_app_indices) > 0 {
+							selected_index = min(
+								len(filtered_app_indices) - 1,
+								selected_index + visible_row_count,
+							)
+						}
 						break
 
 					case .BACKSPACE:
 						_, _ = strings.pop_rune(&input)
 						input_dirty = true
+						search_dirty = true
 						caret_state.last_input_at = sdl.GetTicks()
 						caret_state.has_input_activity = true
 						break
@@ -631,16 +649,22 @@ main_window :: proc() {
 				case .TEXT_INPUT:
 					strings.write_string(&input, string(e.text.text))
 					input_dirty = true
+					search_dirty = true
 					caret_state.last_input_at = sdl.GetTicks()
 					caret_state.has_input_activity = true
 
 				case .MOUSE_WHEEL:
 					now := sdl.GetTicks()
-					if e.wheel.y != 0 &&
+					if len(filtered_app_indices) > 0 &&
+					   e.wheel.y != 0 &&
 					   (last_wheel_scroll_at == 0 ||
 							   now - last_wheel_scroll_at >= WHEEL_SCROLL_INTERVAL) {
 						direction := -1 if e.wheel.y > 0 else 1
-						selected_index = clamp(selected_index + direction, 0, len(apps) - 1)
+						selected_index = clamp(
+							selected_index + direction,
+							0,
+							len(filtered_app_indices) - 1,
+						)
 						last_wheel_scroll_at = now
 					}
 
@@ -654,13 +678,15 @@ main_window :: proc() {
 						   mouse_y < list_y + list_height {
 							visible_index := int((mouse_y - list_y) / row_height)
 							clicked_index := scroll_offset + visible_index
-							if clicked_index < len(apps) && visible_index < visible_row_count {
+							if clicked_index < len(filtered_app_indices) &&
+							   visible_index < visible_row_count {
 								selected_index = clicked_index
-								if apps[clicked_index].exec != nil {
-									if launch_app(string(apps[clicked_index].exec)) {
+								app_index := filtered_app_indices[clicked_index]
+								if apps[app_index].exec != nil {
+									if launch_app(string(apps[app_index].exec)) {
 										running = false
 									} else {
-										fmt.eprintln("Failed to launch ", apps[clicked_index].name)
+										fmt.eprintln("Failed to launch ", apps[app_index].name)
 									}
 								}
 							}
@@ -702,9 +728,21 @@ main_window :: proc() {
 					running = false
 				}
 
-				if !running {
-					break
-				}
+			if !running {
+				break
+			}
+		}
+
+			if search_dirty {
+				delete(filtered_app_indices)
+				filtered_app_indices = search_apps(apps[:], strings.to_string(input))
+				selected_index = 0
+				scroll_offset = 0
+				max_scroll_offset = max(
+					0,
+					len(filtered_app_indices) - visible_row_count,
+				)
+				search_dirty = false
 			}
 
 			if selected_index < scroll_offset {
@@ -744,8 +782,12 @@ main_window :: proc() {
 			)
 
 			assert(sdl.SetRenderClipRect(renderer, &list_clip))
-			visible_end := min(len(apps), scroll_offset + visible_row_count)
+			visible_end := min(
+				len(filtered_app_indices),
+				scroll_offset + visible_row_count,
+			)
 			for application_index in scroll_offset ..< visible_end {
+				source_index := filtered_app_indices[application_index]
 				visible_index := application_index - scroll_offset
 				row_y := list_y + f32(visible_index) * row_height
 
@@ -762,18 +804,18 @@ main_window :: proc() {
 				row_text_x := list_x + 10 * render_scale_x
 				name_width: i32
 				assert(
-					ttf.GetTextSize(application_name_texts[application_index], &name_width, nil),
+					ttf.GetTextSize(application_name_texts[source_index], &name_width, nil),
 				)
 				assert(
 					ttf.DrawRendererText(
-						application_name_texts[application_index],
+						application_name_texts[source_index],
 						row_text_x,
 						row_y + (row_height - f32(list_name_height)) / 2,
 					),
 				)
 				assert(
 					ttf.DrawRendererText(
-						application_description_texts[application_index],
+						application_description_texts[source_index],
 						row_text_x + f32(name_width) + 8 * render_scale_x,
 						row_y + (row_height - f32(list_description_height)) / 2,
 					),

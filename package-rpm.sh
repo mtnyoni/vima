@@ -3,8 +3,15 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-package_version="${1:-0.1.0-3}"
 package_dir="$project_dir/build/packages"
+
+if (( $# != 1 )); then
+	echo "usage: $0 VERSION-RELEASE" >&2
+	echo "example: $0 0.1.0-4" >&2
+	exit 2
+fi
+
+package_version="$1"
 
 if [[ ! "$package_version" =~ ^([0-9]+([.][0-9]+)*)-([0-9]+)$ ]]; then
 	echo "error: version must use version-release format, for example 0.1.0-3" >&2
