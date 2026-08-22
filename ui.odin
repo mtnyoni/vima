@@ -7,6 +7,7 @@ import "core:mem"
 import "core:strings"
 
 import sdl "vendor:sdl3"
+import image "vendor:sdl3/image"
 import ttf "vendor:sdl3/ttf"
 
 when ODIN_OS == .Windows {
@@ -25,6 +26,7 @@ INPUT_RADIUS: i32 = 6
 INPUT_FONT_SIZE: f32 = 11
 FONT_SIZE_SCALE: f32 = 1.2
 LIST_HIGHLIGHT_RADIUS: i32 = 5
+LIST_ICON_SIZE: f32 = 18
 LIST_DESCRIPTION_SIZE_RATIO :: 11.0 / 13.0
 LIST_ROW_HEIGHT_RATIO :: 32.0 / 13.0
 WHEEL_SCROLL_INTERVAL: u64 = 90
@@ -542,6 +544,42 @@ main_window :: proc() {
 
 		defer destroy_installed_apps(apps)
 
+		icon_theme := active_icon_theme()
+		defer delete(icon_theme)
+		application_icon_textures := make([]^sdl.Texture, len(apps))
+		defer delete(application_icon_textures)
+		for application, index in apps {
+			icon_path := resolve_icon_path(application.icon, icon_theme)
+			if icon_path == nil {
+				continue
+			}
+			application_icon_textures[index] = image.LoadTexture(renderer, icon_path)
+			delete(icon_path)
+			if application_icon_textures[index] != nil {
+				_ = sdl.SetTextureScaleMode(application_icon_textures[index], .LINEAR)
+			}
+		}
+
+		fallback_icon_texture: ^sdl.Texture
+		fallback_icon_path := resolve_icon_path(ICON_FALLBACK_NAME, icon_theme)
+		if fallback_icon_path != nil {
+			fallback_icon_texture = image.LoadTexture(renderer, fallback_icon_path)
+			delete(fallback_icon_path)
+			if fallback_icon_texture != nil {
+				_ = sdl.SetTextureScaleMode(fallback_icon_texture, .LINEAR)
+			}
+		}
+		defer {
+			for texture in application_icon_textures {
+				if texture != nil {
+					sdl.DestroyTexture(texture)
+				}
+			}
+			if fallback_icon_texture != nil {
+				sdl.DestroyTexture(fallback_icon_texture)
+			}
+		}
+
 		application_name_texts := make([]^ttf.Text, len(apps))
 		defer delete(application_name_texts)
 		application_description_texts := make([]^ttf.Text, len(apps))
@@ -928,6 +966,24 @@ main_window :: proc() {
 						row_y + (row_height - f32(list_description_height)) / 2,
 					),
 				)
+
+				icon_texture := application_icon_textures[source_index]
+				if icon_texture == nil {
+					icon_texture = fallback_icon_texture
+				}
+				if icon_texture != nil {
+					icon_size := min(
+						LIST_ICON_SIZE * render_scale_y,
+						row_height - 8 * render_scale_y,
+					)
+					icon_rect := sdl.FRect {
+						x = list_x + list_width - icon_size - 10 * render_scale_x,
+						y = row_y + (row_height - icon_size) / 2,
+						w = icon_size,
+						h = icon_size,
+					}
+					sdl.RenderTexture(renderer, icon_texture, nil, &icon_rect)
+				}
 
 				separator := sdl.FRect {
 					x = list_x + 10 * render_scale_x,

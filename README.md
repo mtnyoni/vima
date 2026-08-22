@@ -15,6 +15,7 @@ sudo dnf install \
   binutils \
   gcc \
   SDL3-devel \
+  SDL3_image-devel \
   SDL3_ttf-devel \
   desktop-file-utils \
   google-noto-sans-fonts \

@@ -16,9 +16,9 @@ if ! command -v pkg-config >/dev/null 2>&1; then
 	exit 1
 fi
 
-if ! pkg-config --exists sdl3 sdl3-ttf; then
+if ! pkg-config --exists sdl3 sdl3-ttf sdl3-image; then
 	echo "error: SDL3 development packages are missing" >&2
-	echo "install them with: sudo dnf install SDL3-devel SDL3_ttf-devel" >&2
+	echo "install them with: sudo dnf install SDL3-devel SDL3_ttf-devel SDL3_image-devel" >&2
 	exit 1
 fi
 

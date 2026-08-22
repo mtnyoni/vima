@@ -4,6 +4,7 @@ param(
     [ValidatePattern("^[0-9]+(\.[0-9]+)*-[0-9]+$")]
     [string]$Version = "0.1.0-3",
     [string]$SDL3Root = $env:SDL3_DIR,
+    [string]$SDL3ImageRoot = $env:SDL3_IMAGE_DIR,
     [string]$SDL3TtfRoot = $env:SDL3_TTF_DIR,
     [switch]$PortableOnly
 )
@@ -23,6 +24,10 @@ if ([string]::IsNullOrWhiteSpace($SDL3Root)) {
 
 if ([string]::IsNullOrWhiteSpace($SDL3TtfRoot)) {
     throw "Set SDL3_TTF_DIR to the extracted SDL3_ttf development package directory."
+}
+
+if ([string]::IsNullOrWhiteSpace($SDL3ImageRoot)) {
+    throw "Set SDL3_IMAGE_DIR to the extracted SDL3_image development package directory."
 }
 
 function Find-DependencyFile {
@@ -65,8 +70,10 @@ function Find-InnoCompiler {
 }
 
 $SDL3Lib = Find-DependencyFile -Root $SDL3Root -Name "SDL3.lib"
+$SDL3ImageLib = Find-DependencyFile -Root $SDL3ImageRoot -Name "SDL3_image.lib"
 $SDL3TtfLib = Find-DependencyFile -Root $SDL3TtfRoot -Name "SDL3_ttf.lib"
 $SDL3Dll = Find-DependencyFile -Root $SDL3Root -Name "SDL3.dll"
+$SDL3ImageDll = Find-DependencyFile -Root $SDL3ImageRoot -Name "SDL3_image.dll"
 $SDL3TtfDll = Find-DependencyFile -Root $SDL3TtfRoot -Name "SDL3_ttf.dll"
 
 $FontPath = "C:\Windows\Fonts\segoeui.ttf"
@@ -76,7 +83,7 @@ if (-not (Test-Path $FontPath)) {
 
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
-$LinkerFlags = "/LIBPATH:`"$($SDL3Lib.DirectoryName)`" /LIBPATH:`"$($SDL3TtfLib.DirectoryName)`""
+$LinkerFlags = "/LIBPATH:`"$($SDL3Lib.DirectoryName)`" /LIBPATH:`"$($SDL3ImageLib.DirectoryName)`" /LIBPATH:`"$($SDL3TtfLib.DirectoryName)`""
 $OdinArgs = @(
     "build",
     $ProjectDir,
@@ -96,7 +103,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Copy SDL and any companion runtime DLLs shipped beside them.
-@($SDL3Dll.DirectoryName, $SDL3TtfDll.DirectoryName) |
+@($SDL3Dll.DirectoryName, $SDL3ImageDll.DirectoryName, $SDL3TtfDll.DirectoryName) |
     Select-Object -Unique |
     ForEach-Object {
         Get-ChildItem -Path $_ -Filter "*.dll" -File |
