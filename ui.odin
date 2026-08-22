@@ -322,11 +322,7 @@ main_window :: proc() {
 	context.allocator = mem.tracking_allocator(&track)
 
 	when ODIN_OS == .Linux {
-		_ = sdl.SetHintWithPriority(
-			sdl.HINT_VIDEO_DRIVER,
-			"x11,wayland",
-			.OVERRIDE,
-		)
+		_ = sdl.SetHintWithPriority(sdl.HINT_VIDEO_DRIVER, "x11,wayland", .OVERRIDE)
 	}
 
 	assert(sdl.Init(sdl.INIT_VIDEO))
@@ -366,17 +362,17 @@ main_window :: proc() {
 			window_width,
 			window_height,
 			{
+				.HIDDEN,
 				.UTILITY,
 				.HIGH_PIXEL_DENSITY,
 				.BORDERLESS,
 				.TRANSPARENT,
 				.ALWAYS_ON_TOP,
-				.INPUT_FOCUS,
-				.MOUSE_FOCUS,
 			},
 		)
 		assert(window != nil)
 		defer sdl.DestroyWindow(window)
+		window_id := sdl.GetWindowID(window)
 
 		shape := window_backdrop_surface(
 			i32(math.round(f32(WINDOW_WIDTH) * window_coordinate_scale)),
@@ -453,7 +449,9 @@ main_window :: proc() {
 		input_text := ttf.CreateText(text_engine, font, "", 0)
 		assert(input_text != nil)
 		defer ttf.DestroyText(input_text)
-		assert(ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a))
+		assert(
+			ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a),
+		)
 
 		apps, err := get_system_wide_apps()
 		if err.message != "" {
@@ -461,8 +459,6 @@ main_window :: proc() {
 			return
 		}
 
-		fmt.println("Apps:")
-		display_apps(apps)
 		defer destroy_installed_apps(apps)
 
 		application_name_texts := make([]^ttf.Text, len(apps))
@@ -581,6 +577,8 @@ main_window :: proc() {
 		selected_index := 0
 		scroll_offset := 0
 		last_wheel_scroll_at: u64
+		window_shown := false
+		has_focus := false
 		running := true
 		for running {
 			e: sdl.Event
@@ -669,20 +667,32 @@ main_window :: proc() {
 						}
 					}
 
+				case .WINDOW_FOCUS_GAINED:
+					if e.window.windowID == window_id {
+						has_focus = true
+					}
+
 				case .WINDOW_FOCUS_LOST:
-					running = false
+					if e.window.windowID == window_id && has_focus {
+						running = false
+					}
 
 				case .WINDOW_DISPLAY_SCALE_CHANGED, .WINDOW_PIXEL_SIZE_CHANGED:
+					if e.window.windowID != window_id {
+						break
+					}
 					current_render_width, current_render_height: i32
 					if sdl.GetCurrentRenderOutputSize(
-						renderer,
-						&current_render_width,
-						&current_render_height,
-					) &&
+						   renderer,
+						   &current_render_width,
+						   &current_render_height,
+					   ) &&
 					   (current_render_width != render_width ||
-						   current_render_height != render_height ||
-						   abs(sdl.GetWindowDisplayScale(window) - initial_display_scale) > 0.001 ||
-						   abs(sdl.GetWindowPixelDensity(window) - initial_pixel_density) > 0.001) {
+							   current_render_height != render_height ||
+							   abs(sdl.GetWindowDisplayScale(window) - initial_display_scale) >
+								   0.001 ||
+							   abs(sdl.GetWindowPixelDensity(window) - initial_pixel_density) >
+								   0.001) {
 						requested_display_scale = sdl.GetWindowDisplayScale(window)
 						rebuild_ui = true
 						running = false
@@ -751,7 +761,9 @@ main_window :: proc() {
 
 				row_text_x := list_x + 10 * render_scale_x
 				name_width: i32
-				assert(ttf.GetTextSize(application_name_texts[application_index], &name_width, nil))
+				assert(
+					ttf.GetTextSize(application_name_texts[application_index], &name_width, nil),
+				)
 				assert(
 					ttf.DrawRendererText(
 						application_name_texts[application_index],
@@ -787,6 +799,13 @@ main_window :: proc() {
 
 			sdl.RenderTexture(renderer, border_texture, nil, &content_rect)
 			sdl.RenderPresent(renderer)
+
+			if !window_shown {
+				assert(sdl.ShowWindow(window))
+				_ = sdl.RaiseWindow(window)
+				_ = sdl.SyncWindow(window)
+				window_shown = true
+			}
 		}
 	}
 }
