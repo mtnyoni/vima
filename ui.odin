@@ -322,7 +322,15 @@ main_window :: proc() {
 	context.allocator = mem.tracking_allocator(&track)
 
 	when ODIN_OS == .Linux {
-		_ = sdl.SetHintWithPriority(sdl.HINT_VIDEO_DRIVER, "x11,wayland", .OVERRIDE)
+		// Prefer the native layer-shell backend when the compositor advertises
+		// it. SDL_VIDEO_DRIVER remains available as an explicit override.
+		if sdl.GetHint(sdl.HINT_VIDEO_DRIVER) == nil {
+			driver_order: cstring = "x11,wayland"
+			if vima_layer_shell_supported() != 0 {
+				driver_order = "wayland,x11"
+			}
+			_ = sdl.SetHintWithPriority(sdl.HINT_VIDEO_DRIVER, driver_order, .DEFAULT)
+		}
 	}
 
 	assert(sdl.Init(sdl.INIT_VIDEO))
@@ -357,34 +365,89 @@ main_window :: proc() {
 
 		window_width := i32(math.round(f32(base_window_width) * window_coordinate_scale))
 		window_height := i32(math.round(f32(base_window_height) * window_coordinate_scale))
-		window := sdl.CreateWindow(
-			"Vima",
-			window_width,
-			window_height,
-			{
-				.HIDDEN,
-				.UTILITY,
-				.HIGH_PIXEL_DENSITY,
-				.BORDERLESS,
-				.TRANSPARENT,
-				.ALWAYS_ON_TOP,
-			},
-		)
+		layer_shell_mode := false
+		when ODIN_OS == .Linux {
+			layer_shell_mode = string(sdl.GetCurrentVideoDriver()) == "wayland"
+		}
+
+		window: ^sdl.Window
+		if layer_shell_mode {
+			properties := sdl.CreateProperties()
+			assert(properties != 0)
+			assert(sdl.SetStringProperty(properties, sdl.PROP_WINDOW_CREATE_TITLE_STRING, "Vima"))
+			assert(sdl.SetNumberProperty(properties, sdl.PROP_WINDOW_CREATE_WIDTH_NUMBER, i64(window_width)))
+			assert(sdl.SetNumberProperty(properties, sdl.PROP_WINDOW_CREATE_HEIGHT_NUMBER, i64(window_height)))
+			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true))
+			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true))
+			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN, true))
+			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN, true))
+			assert(sdl.SetBooleanProperty(properties, sdl.PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN, true))
+			window = sdl.CreateWindowWithProperties(properties)
+			sdl.DestroyProperties(properties)
+		} else {
+			window = sdl.CreateWindow(
+				"Vima",
+				window_width,
+				window_height,
+				{
+					.HIDDEN,
+					.UTILITY,
+					.HIGH_PIXEL_DENSITY,
+					.BORDERLESS,
+					.TRANSPARENT,
+					.ALWAYS_ON_TOP,
+				},
+			)
+		}
 		assert(window != nil)
 		defer sdl.DestroyWindow(window)
 		window_id := sdl.GetWindowID(window)
 
-		shape := window_backdrop_surface(
-			i32(math.round(f32(WINDOW_WIDTH) * window_coordinate_scale)),
-			i32(math.round(f32(WINDOW_HEIGHT) * window_coordinate_scale)),
-			i32(math.round(f32(WINDOW_SHADOW_PADDING) * window_coordinate_scale)),
-			i32(math.round(f32(WINDOW_RADIUS) * window_coordinate_scale)),
-			app_color,
-			shadow_color,
-		)
-		assert(shape != nil)
-		assert(sdl.SetWindowShape(window, shape))
-		sdl.DestroySurface(shape)
+		layer_shell_state: rawptr
+		when ODIN_OS == .Linux {
+			if layer_shell_mode {
+				window_properties := sdl.GetWindowProperties(window)
+				display := sdl.GetPointerProperty(
+					window_properties,
+					sdl.PROP_WINDOW_WAYLAND_DISPLAY_POINTER,
+					nil,
+				)
+				surface := sdl.GetPointerProperty(
+					window_properties,
+					sdl.PROP_WINDOW_WAYLAND_SURFACE_POINTER,
+					nil,
+				)
+				layer_shell_state = vima_layer_shell_attach(display, surface)
+				if layer_shell_state == nil {
+					fmt.eprintln("Unable to create the Wayland layer-shell surface")
+					return
+				}
+				window_width = i32(vima_layer_shell_width(layer_shell_state))
+				window_height = i32(vima_layer_shell_height(layer_shell_state))
+				assert(sdl.SetWindowSize(window, window_width, window_height))
+			}
+		}
+		defer {
+			when ODIN_OS == .Linux {
+				if layer_shell_state != nil {
+					vima_layer_shell_destroy(layer_shell_state)
+				}
+			}
+		}
+
+		if !layer_shell_mode {
+			shape := window_backdrop_surface(
+				i32(math.round(f32(WINDOW_WIDTH) * window_coordinate_scale)),
+				i32(math.round(f32(WINDOW_HEIGHT) * window_coordinate_scale)),
+				i32(math.round(f32(WINDOW_SHADOW_PADDING) * window_coordinate_scale)),
+				i32(math.round(f32(WINDOW_RADIUS) * window_coordinate_scale)),
+				app_color,
+				shadow_color,
+			)
+			assert(shape != nil)
+			assert(sdl.SetWindowShape(window, shape))
+			sdl.DestroySurface(shape)
+		}
 
 		renderer := sdl.CreateRenderer(window, nil)
 		assert(renderer != nil)
@@ -392,21 +455,39 @@ main_window :: proc() {
 
 		render_width, render_height: i32
 		assert(sdl.GetCurrentRenderOutputSize(renderer, &render_width, &render_height))
-		// UI scale controls physical content size. Pixel scale only converts
-		// window/input coordinates into renderer coordinates.
-		render_scale_x := f32(render_width) / f32(base_window_width)
-		render_scale_y := f32(render_height) / f32(base_window_height)
 		pixel_scale_x := f32(render_width) / f32(window_width)
 		pixel_scale_y := f32(render_height) / f32(window_height)
+		// A Wayland layer surface covers the output. The launcher panel remains
+		// at its normal scaled size and is centered inside that transparent area.
+		panel_width := render_width
+		panel_height := render_height
+		if layer_shell_mode {
+			panel_width = i32(math.round(f32(base_window_width) * pixel_scale_x))
+			panel_height = i32(math.round(f32(base_window_height) * pixel_scale_y))
+			panel_width = min(panel_width, render_width)
+			panel_height = min(panel_height, render_height)
+		}
+		panel_x := f32(render_width - panel_width) / 2
+		panel_y := f32(render_height - panel_height) / 2
+		panel_rect := sdl.FRect {
+			x = panel_x,
+			y = panel_y,
+			w = f32(panel_width),
+			h = f32(panel_height),
+		}
+		// UI scale controls physical content size. Pixel scale only converts
+		// window/input coordinates into renderer coordinates.
+		render_scale_x := f32(panel_width) / f32(base_window_width)
+		render_scale_y := f32(panel_height) / f32(base_window_height)
 		initial_display_scale := sdl.GetWindowDisplayScale(window)
 		initial_pixel_density := sdl.GetWindowPixelDensity(window)
 		shadow_padding_x := f32(WINDOW_SHADOW_PADDING) * render_scale_x
 		shadow_padding_y := f32(WINDOW_SHADOW_PADDING) * render_scale_y
-		content_width := render_width - i32(shadow_padding_x) * 2
-		content_height := render_height - i32(shadow_padding_y) * 2
+		content_width := panel_width - i32(shadow_padding_x) * 2
+		content_height := panel_height - i32(shadow_padding_y) * 2
 		content_rect := sdl.FRect {
-			x = shadow_padding_x,
-			y = shadow_padding_y,
+			x = panel_x + shadow_padding_x,
+			y = panel_y + shadow_padding_y,
 			w = f32(content_width),
 			h = f32(content_height),
 		}
@@ -518,8 +599,8 @@ main_window :: proc() {
 			h = f32(content_height),
 		}
 
-		input_x := shadow_padding_x + 4 * render_scale_x
-		input_y := shadow_padding_y + 4 * render_scale_y
+		input_x := panel_x + shadow_padding_x + 4 * render_scale_x
+		input_y := panel_y + shadow_padding_y + 4 * render_scale_y
 		input_width := f32(content_width) - 8 * render_scale_x
 		input_height := INPUT_HEIGHT * render_scale_y
 		input_surface := rounded_input_surface(
@@ -545,7 +626,7 @@ main_window :: proc() {
 		list_x := input_x
 		list_y := input_y + input_height + 4 * render_scale_y
 		list_width := input_width
-		list_height := shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
+		list_height := panel_y + shadow_padding_y + f32(content_height) - 4 * render_scale_y - list_y
 		row_height := list_font_size * LIST_ROW_HEIGHT_RATIO * render_scale_y
 		visible_row_count := max(1, int(list_height / row_height))
 		row_height = list_height / f32(visible_row_count)
@@ -587,6 +668,21 @@ main_window :: proc() {
 		has_focus := false
 		running := true
 		for running {
+			when ODIN_OS == .Linux {
+				if layer_shell_state != nil {
+					if vima_layer_shell_closed(layer_shell_state) != 0 {
+						break
+					}
+					configured_width := i32(vima_layer_shell_width(layer_shell_state))
+					configured_height := i32(vima_layer_shell_height(layer_shell_state))
+					if configured_width != window_width || configured_height != window_height {
+						assert(sdl.SetWindowSize(window, configured_width, configured_height))
+						rebuild_ui = true
+						break
+					}
+				}
+			}
+
 			e: sdl.Event
 
 			for sdl.PollEvent(&e) {
@@ -672,7 +768,13 @@ main_window :: proc() {
 					if e.button.button == sdl.BUTTON_LEFT {
 						mouse_x := e.button.x * pixel_scale_x
 						mouse_y := e.button.y * pixel_scale_y
-						if mouse_x >= list_x &&
+						if layer_shell_mode &&
+						   (mouse_x < panel_x ||
+							   mouse_x >= panel_x + f32(panel_width) ||
+							   mouse_y < panel_y ||
+							   mouse_y >= panel_y + f32(panel_height)) {
+							running = false
+						} else if mouse_x >= list_x &&
 						   mouse_x < list_x + list_width &&
 						   mouse_y >= list_y &&
 						   mouse_y < list_y + list_height {
@@ -754,7 +856,7 @@ main_window :: proc() {
 
 			sdl.SetRenderDrawColor(renderer, 0, 0, 0, 0)
 			sdl.RenderClear(renderer)
-			sdl.RenderTexture(renderer, backdrop_texture, nil, nil)
+			sdl.RenderTexture(renderer, backdrop_texture, nil, &panel_rect)
 
 			sdl.RenderTexture(renderer, input_texture, nil, &input_rect)
 
@@ -844,7 +946,9 @@ main_window :: proc() {
 
 			if !window_shown {
 				assert(sdl.ShowWindow(window))
-				_ = sdl.RaiseWindow(window)
+				if !layer_shell_mode {
+					_ = sdl.RaiseWindow(window)
+				}
 				_ = sdl.SyncWindow(window)
 				window_shown = true
 			}

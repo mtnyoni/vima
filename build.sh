@@ -22,6 +22,8 @@ if ! pkg-config --exists sdl3 sdl3-ttf; then
 	exit 1
 fi
 
+"$project_dir/native/build.sh" >/dev/null
+
 if [[ ! -f /usr/share/fonts/google-noto/NotoSans-Regular.ttf ]]; then
 	echo "error: Noto Sans is missing" >&2
 	echo "install it with: sudo dnf install google-noto-sans-fonts" >&2

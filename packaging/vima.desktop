@@ -7,4 +7,4 @@ Icon=system-run
 Terminal=false
 Categories=Utility;
 Keywords=launcher;applications;search;
-StartupNotify=true
+StartupNotify=false

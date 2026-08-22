@@ -1,8 +1,10 @@
 # Vima
 
 Vima is a graphical application launcher built with Odin, SDL3, and SDL3_ttf.
-On Linux it prefers SDL's X11 backend so the launcher can be excluded from the
-taskbar, then falls back to Wayland when X11 is unavailable.
+On supported Wayland compositors it uses the layer-shell protocol, so the
+launcher is an overlay instead of a normal application window. It therefore
+does not appear in the taskbar or Alt-Tab list. X11 remains available as a
+utility-window fallback.
 
 ## Fedora requirements
 
@@ -10,12 +12,16 @@ Install the native build and RPM packaging dependencies:
 
 ```bash
 sudo dnf install \
+  binutils \
+  gcc \
   SDL3-devel \
   SDL3_ttf-devel \
   desktop-file-utils \
   google-noto-sans-fonts \
   pkgconf-pkg-config \
-  rpm-build
+  rpm-build \
+  wayland-devel \
+  wayland-protocols-devel
 ```
 
 Install Odin separately and ensure that `odin` is available on `PATH`:
@@ -26,17 +32,43 @@ odin version
 
 ## Run from source
 
-Run the project directly during development:
+Run the project during development:
+
+```bash
+./run.sh
+```
+
+The wrapper generates and compiles the Wayland protocol shim before invoking
+`odin run`. Arguments supplied to the wrapper are passed to Vima.
+
+After `./run.sh` or `./build.sh` has generated `build/native/libvima-wayland.a`,
+the regular command also works:
 
 ```bash
 odin run .
 ```
+
+On a clean checkout, run `./run.sh` first because Odin cannot compile the C shim
+as part of a `foreign import`.
 
 Type-check without launching the window:
 
 ```bash
 odin check .
 ```
+
+Vima automatically prefers native Wayland when the compositor advertises
+`wlr-layer-shell`. To test a backend explicitly:
+
+```bash
+SDL_VIDEO_DRIVER=wayland ./run.sh
+SDL_VIDEO_DRIVER=x11 ./run.sh
+```
+
+The Wayland surface covers the selected output transparently, while the visible
+launcher remains centered. This lets a click outside the launcher close it
+without creating a taskbar window. Compositors without layer-shell support fall
+back to X11 when XWayland is available.
 
 ## Build
 
