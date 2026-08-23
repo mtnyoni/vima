@@ -8,6 +8,7 @@ import "core:strings"
 
 Installed_App :: struct {
 	name:         cstring,
+	search_index: string,
 	generic_name: cstring,
 	exec:         cstring,
 	icon:         cstring,
@@ -18,28 +19,45 @@ App_Error :: struct {
 	message: string,
 }
 
-get_system_wide_apps :: proc() -> ([dynamic]Installed_App, App_Error) {
+get_installed_apps_info :: proc() -> ([dynamic]Installed_App, App_Error) {
 	_temp_guard, _ := runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 
-	value, found := os.lookup_env("XDG_DATA_DIRS", context.temp_allocator)
-	if !found {
-		return {}, App_Error{message = "XDG_DATA_DIRS not found"}
+	combined_apps_dir := make([dynamic]string, context.allocator)
+	defer {
+		for dir in combined_apps_dir {
+			delete(dir)
+		}
+
+		delete(combined_apps_dir)
 	}
 
-	dirs := strings.split(value, ":", context.temp_allocator)
-
-	apps_dirs := make([]string, len(dirs), context.temp_allocator)
-	for dir, i in dirs {
-		apps_dirs[i] = strings.concatenate({dir, "/applications"}, context.temp_allocator)
+	user_apps_dir := get_user_apps_dir()
+	if len(user_apps_dir) > 0 {
+		append(&combined_apps_dir, user_apps_dir)
 	}
 
-	apps := make([dynamic]Installed_App, context.allocator)
+	system_apps_dirs := get_system_apps_dirs()
+	append(&combined_apps_dir, ..system_apps_dirs[:])
+	delete(system_apps_dirs)
+
+	apps := get_apps_info_from_dirs(combined_apps_dir[:])
+	slice.sort_by(apps[:], proc(a: Installed_App, b: Installed_App) -> bool {
+		return a.name < b.name
+	})
+
+	return apps, {}
+}
+
+get_apps_info_from_dirs :: proc(
+	apps_dirs: []string,
+	allocator := context.allocator,
+) -> [dynamic]Installed_App {
+	apps := make([dynamic]Installed_App, allocator)
 	for dir, _ in apps_dirs {
 		files, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 		if err != nil {
 			continue
 		}
-
 
 		for file, _ in files {
 			if !strings.ends_with(file.name, ".desktop") {
@@ -51,14 +69,10 @@ get_system_wide_apps :: proc() -> ([dynamic]Installed_App, App_Error) {
 		}
 	}
 
-	slice.sort_by(apps[:], proc(a: Installed_App, b: Installed_App) -> bool {
-		return a.name < b.name
-	})
-	return apps, {}
+	return apps
 }
 
-
-parse_desktop_file :: proc(file_path: string) -> Installed_App {
+parse_desktop_file :: proc(file_path: string, allocator := context.allocator) -> Installed_App {
 	data, err := os.read_entire_file_from_path(file_path, context.temp_allocator)
 	if err != nil {
 		return Installed_App{}
@@ -89,7 +103,12 @@ parse_desktop_file :: proc(file_path: string) -> Installed_App {
 		switch key {
 		case "Name":
 			if app.name == nil {
-				app.name = strings.clone_to_cstring(value, context.allocator)
+				app.name = strings.clone_to_cstring(value, allocator)
+				if app.search_index == "" {
+					lower_name := strings.to_lower(value, allocator)
+					app.search_index = lower_name
+					delete(lower_name)
+				}
 			}
 
 		case "Exec":
@@ -99,96 +118,22 @@ parse_desktop_file :: proc(file_path: string) -> Installed_App {
 
 		case "Icon":
 			if app.icon == nil {
-				app.icon = strings.clone_to_cstring(value, context.allocator)
+				app.icon = strings.clone_to_cstring(value, allocator)
 			}
 
 		case "Comment":
 			if app.description == nil {
-				app.description = strings.clone_to_cstring(value, context.allocator)
+				app.description = strings.clone_to_cstring(value, allocator)
 			}
 
 		case "GenericName":
 			if app.generic_name == nil {
-				app.generic_name = strings.clone_to_cstring(value, context.allocator)
+				app.generic_name = strings.clone_to_cstring(value, allocator)
 			}
 		}
 	}
 
 	return app
-}
-
-destroy_installed_apps :: proc(apps: [dynamic]Installed_App) {
-	for app in apps {
-		if app.name != nil {
-			delete(app.name)
-		}
-
-		if app.exec != nil {
-			delete(app.exec)
-		}
-
-		if app.generic_name != nil {
-			delete(app.generic_name)
-		}
-
-		if app.icon != nil {
-			delete(app.icon)
-		}
-
-		if app.description != nil {
-			delete(app.description)
-		}
-	}
-
-	delete(apps)
-}
-
-clean_exec_string :: proc(exec: string) -> cstring {
-	tokens := strings.split(exec, " ")
-	defer delete(tokens)
-
-	sb := strings.builder_make()
-	defer strings.builder_destroy(&sb)
-
-	first := true
-	for token in tokens {
-		if token == "%f" ||
-		   token == "%F" ||
-		   token == "%u" ||
-		   token == "%U" ||
-		   token == "%i" ||
-		   token == "%c" ||
-		   token == "%k" ||
-		   token == "%v" ||
-		   token == "%m" {
-			continue
-		}
-
-		if !first {
-			strings.write_byte(&sb, ' ')
-		}
-
-		strings.write_string(&sb, token)
-		first = false
-	}
-
-	temp := strings.clone(strings.to_string(sb), context.allocator)
-	defer delete(temp)
-
-	return strings.clone_to_cstring(temp, context.allocator)
-}
-
-exec_to_argv :: proc(exec: string) -> []string {
-	parts := strings.split(exec, " ")
-	// parts[0] is the binary, parts[1:] are args — clone since `parts` holds
-	// substrings into `cleaned`, which we're about to free
-	argv := make([]string, len(parts))
-	for p, i in parts {
-		argv[i] = strings.clone(p)
-	}
-
-	delete(parts)
-	return argv
 }
 
 launch_app :: proc(exec: string) -> bool {
@@ -224,15 +169,121 @@ search_apps :: proc(
 	lower_query := strings.to_lower(query, context.temp_allocator)
 
 	for app, index in apps {
-		if app.name == nil {
+		if app.search_index == "" {
 			continue
 		}
 
-		lower_name := strings.to_lower(string(app.name), context.temp_allocator)
-		if strings.contains(lower_name, lower_query) {
+		if strings.contains(app.search_index, lower_query) {
 			append(&result, index)
 		}
 	}
 
 	return result
+}
+
+get_user_apps_dir :: proc(allocator := context.allocator) -> string {
+	_temp_guard, _ := runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+
+	value, ok := os.lookup_env("XDG_DATA_HOME", context.temp_allocator)
+	if !ok || value == "" {
+		home := os.get_env("HOME", context.temp_allocator)
+		if len(home) == 0 {
+			return ""
+		}
+		return strings.concatenate({home, "/.local/share/applications"}, allocator)
+	}
+	return strings.concatenate({value, "/applications"}, allocator)
+}
+
+get_system_apps_dirs :: proc(allocator := context.allocator) -> []string {
+	_temp_guard, _ := runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+
+	value, found := os.lookup_env("XDG_DATA_DIRS", context.temp_allocator)
+	if !found || len(value) == 0 {
+		value = "/usr/local/share:/usr/share"
+	}
+
+	dirs := strings.split(value, ":", context.temp_allocator)
+	apps_dirs := make([]string, len(dirs), allocator)
+	for dir, i in dirs {
+		if len(dir) == 0 {
+			continue
+		}
+		apps_dirs[i] = strings.concatenate({dir, "/applications"}, allocator)
+	}
+
+	return apps_dirs
+}
+
+clean_exec_string :: proc(exec: string, allocator := context.allocator) -> cstring {
+	tokens := strings.split(exec, " ")
+	defer delete(tokens)
+
+	sb := strings.builder_make()
+	defer strings.builder_destroy(&sb)
+
+	first := true
+	for token in tokens {
+		if token == "%f" ||
+		   token == "%F" ||
+		   token == "%u" ||
+		   token == "%U" ||
+		   token == "%i" ||
+		   token == "%c" ||
+		   token == "%k" ||
+		   token == "%v" ||
+		   token == "%m" {
+			continue
+		}
+
+		if !first {
+			strings.write_byte(&sb, ' ')
+		}
+
+		strings.write_string(&sb, token)
+		first = false
+	}
+
+	temp := strings.clone(strings.to_string(sb), context.allocator)
+	defer delete(temp)
+
+	return strings.clone_to_cstring(temp, allocator)
+}
+
+exec_to_argv :: proc(exec: string) -> []string {
+	parts := strings.split(exec, " ")
+	defer delete(parts)
+
+	argv := make([]string, len(parts))
+	for p, i in parts {
+		argv[i] = strings.clone(p)
+	}
+
+	return argv
+}
+
+destroy_installed_apps :: proc(apps: [dynamic]Installed_App, allocator := context.allocator) {
+	for app in apps {
+		if app.name != nil {
+			delete(app.name, allocator)
+		}
+
+		if app.exec != nil {
+			delete(app.exec, allocator)
+		}
+
+		if app.generic_name != nil {
+			delete(app.generic_name, allocator)
+		}
+
+		if app.icon != nil {
+			delete(app.icon, allocator)
+		}
+
+		if app.description != nil {
+			delete(app.description, allocator)
+		}
+	}
+
+	delete(apps)
 }

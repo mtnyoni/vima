@@ -584,7 +584,7 @@ main_window :: proc() {
 			ttf.SetTextColor(input_text, text_color.r, text_color.g, text_color.b, text_color.a),
 		)
 
-		apps, err := get_system_wide_apps()
+		apps, err := get_installed_apps_info()
 		if err.message != "" {
 			fmt.println(err.message)
 			return
