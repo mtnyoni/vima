@@ -290,18 +290,8 @@ main_window :: proc() {
 		defer delete(icon_theme)
 		application_icon_textures := make([]^sdl.Texture, len(apps))
 		defer delete(application_icon_textures)
-		for application, index in apps {
-			icon_path := resolve_icon_path(application.icon, icon_theme)
-			if icon_path == nil {
-				continue
-			}
-
-			application_icon_textures[index] = image.LoadTexture(renderer, icon_path)
-			delete(icon_path)
-			if application_icon_textures[index] != nil {
-				_ = sdl.SetTextureScaleMode(application_icon_textures[index], .LINEAR)
-			}
-		}
+		application_icon_lookups := make([]bool, len(apps))
+		defer delete(application_icon_lookups)
 
 		fallback_icon_texture: ^sdl.Texture
 		fallback_icon_path := resolve_icon_path(ICON_FALLBACK_NAME, icon_theme)
@@ -700,6 +690,24 @@ main_window :: proc() {
 						row_y + (row_height - f32(list_description_height)) / 2,
 					),
 				)
+
+				if !application_icon_lookups[source_index] {
+					application_icon_lookups[source_index] = true
+					icon_path := resolve_icon_path(apps[source_index].icon, icon_theme)
+					if icon_path != nil {
+						application_icon_textures[source_index] = image.LoadTexture(
+							renderer,
+							icon_path,
+						)
+						delete(icon_path)
+						if application_icon_textures[source_index] != nil {
+							_ = sdl.SetTextureScaleMode(
+								application_icon_textures[source_index],
+								.LINEAR,
+							)
+						}
+					}
+				}
 
 				icon_texture := application_icon_textures[source_index]
 				if icon_texture == nil {
