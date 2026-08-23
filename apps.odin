@@ -105,9 +105,7 @@ parse_desktop_file :: proc(file_path: string, allocator := context.allocator) ->
 			if app.name == nil {
 				app.name = strings.clone_to_cstring(value, allocator)
 				if app.search_index == "" {
-					lower_name := strings.to_lower(value, allocator)
-					app.search_index = lower_name
-					delete(lower_name)
+					app.search_index = strings.to_lower(value, allocator)
 				}
 			}
 
@@ -267,6 +265,10 @@ destroy_installed_apps :: proc(apps: [dynamic]Installed_App, allocator := contex
 	for app in apps {
 		if app.name != nil {
 			delete(app.name, allocator)
+		}
+
+		if app.search_index != "" {
+			delete(app.search_index, allocator)
 		}
 
 		if app.exec != nil {
