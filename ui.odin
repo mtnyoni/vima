@@ -371,30 +371,35 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 		assert(border_texture != nil)
 		defer sdl.DestroyTexture(border_texture)
 
-		rect := sdl.FRect {
-			x = shadow_padding_x,
-			y = shadow_padding_y,
-			w = f32(content_width),
-			h = f32(content_height),
-		}
-
+		// input.
 		input_x := panel_x + shadow_padding_x + 4 * render_scale_x
 		input_y := panel_y + shadow_padding_y + 4 * render_scale_y
 		input_width := f32(content_width) - 8 * render_scale_x
 		input_height := INPUT_HEIGHT * render_scale_y
-		input_surface := rounded_input_surface(
-			i32(input_width),
-			i32(input_height),
-			i32(f32(INPUT_RADIUS) * render_scale_y),
-			i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
-			app_color,
-			input_border_color,
-		)
+
+		input_surface_config := Rounded_Input_Surface {
+			width        = i32(input_width),
+			height       = i32(input_height),
+			radius       = i32(f32(INPUT_RADIUS) * render_scale_y),
+			border_width = i32(f32(WINDOW_BORDER_WIDTH) * render_scale_y),
+			border_color = input_border_color,
+			background   = app_color,
+		}
+		input_surface := rounded_input_surface(input_surface_config)
 		assert(input_surface != nil)
 		input_texture := sdl.CreateTextureFromSurface(renderer, input_surface)
 		sdl.DestroySurface(input_surface)
 		assert(input_texture != nil)
 		defer sdl.DestroyTexture(input_texture)
+
+		input_inactive_config := input_surface_config
+		input_inactive_config.border_color = window_border_color
+		input_inactive_surface := rounded_input_surface(input_inactive_config)
+		assert(input_inactive_surface != nil)
+		input_inactive_texture := sdl.CreateTextureFromSurface(renderer, input_inactive_surface)
+		sdl.DestroySurface(input_inactive_surface)
+		assert(input_inactive_texture != nil)
+		defer sdl.DestroyTexture(input_inactive_texture)
 
 		input_rect := sdl.FRect {
 			x = input_x,
@@ -402,6 +407,8 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 			w = input_width,
 			h = input_height,
 		}
+
+		// list.
 		list_x := input_x
 		list_y := input_y + input_height + 4 * render_scale_y
 		list_width := input_width
@@ -417,19 +424,32 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 			w = i32(list_width),
 			h = i32(list_height),
 		}
-		highlight_surface := rounded_input_surface(
-			i32(list_width),
-			i32(row_height),
-			i32(f32(LIST_HIGHLIGHT_RADIUS) * render_scale_y),
-			0,
-			selected_color,
-			selected_color,
-		)
+
+		highlight_height := row_height - 1 * render_scale_y
+		highlight_config := Rounded_Input_Surface {
+			width        = i32(list_width),
+			height       = i32(highlight_height),
+			radius       = i32(f32(LIST_HIGHLIGHT_RADIUS) * render_scale_y),
+			border_width = 0,
+			border_color = selected_color,
+			background   = selected_color,
+		}
+		highlight_surface := rounded_input_surface(highlight_config)
 		assert(highlight_surface != nil)
 		highlight_texture := sdl.CreateTextureFromSurface(renderer, highlight_surface)
 		sdl.DestroySurface(highlight_surface)
 		assert(highlight_texture != nil)
 		defer sdl.DestroyTexture(highlight_texture)
+
+		hover_config := highlight_config
+		hover_config.border_color = hover_color
+		hover_config.background = hover_color
+		hover_surface := rounded_input_surface(hover_config)
+		assert(hover_surface != nil)
+		hover_texture := sdl.CreateTextureFromSurface(renderer, hover_surface)
+		sdl.DestroySurface(hover_surface)
+		assert(hover_texture != nil)
+		defer sdl.DestroyTexture(hover_texture)
 
 		input: strings.Builder
 		strings.builder_init(&input, 0, 256)
@@ -444,9 +464,12 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 		selected_index := 0
 		scroll_offset := 0
 		last_wheel_scroll_at: u64
+		mouse_x, mouse_y: f32
+		has_mouse_position := false
 		window_shown := false
 		has_focus := false
 		running := true
+
 		for running {
 			if poll_toggle_signal(toggle_server) {
 				running = false
@@ -551,10 +574,16 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 						last_wheel_scroll_at = now
 					}
 
+				case .MOUSE_MOTION:
+					mouse_x = e.motion.x * pixel_scale_x
+					mouse_y = e.motion.y * pixel_scale_y
+					has_mouse_position = true
+
 				case .MOUSE_BUTTON_DOWN:
 					if e.button.button == sdl.BUTTON_LEFT {
-						mouse_x := e.button.x * pixel_scale_x
-						mouse_y := e.button.y * pixel_scale_y
+						mouse_x = e.button.x * pixel_scale_x
+						mouse_y = e.button.y * pixel_scale_y
+						has_mouse_position = true
 						if layer_shell_mode &&
 						   (mouse_x < panel_x ||
 								   mouse_x >= panel_x + f32(panel_width) ||
@@ -642,7 +671,11 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 			sdl.RenderClear(renderer)
 			sdl.RenderTexture(renderer, backdrop_texture, nil, &panel_rect)
 
-			sdl.RenderTexture(renderer, input_texture, nil, &input_rect)
+			current_input_texture := input_inactive_texture
+			if has_focus {
+				current_input_texture = input_texture
+			}
+			sdl.RenderTexture(renderer, current_input_texture, nil, &input_rect)
 
 			if input_dirty {
 				input_value, input_error := strings.to_cstring(&input)
@@ -668,6 +701,17 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 			)
 
 			assert(sdl.SetRenderClipRect(renderer, &list_clip))
+			hovered_index := -1
+			if has_mouse_position &&
+			   mouse_x >= list_x && mouse_x < list_x + list_width &&
+			   mouse_y >= list_y && mouse_y < list_y + list_height {
+				visible_index := int((mouse_y - list_y) / row_height)
+				candidate_index := scroll_offset + visible_index
+				if visible_index < visible_row_count && candidate_index < len(filtered_app_indices) {
+					hovered_index = candidate_index
+				}
+			}
+
 			visible_end := min(len(filtered_app_indices), scroll_offset + visible_row_count)
 			for application_index in scroll_offset ..< visible_end {
 				source_index := filtered_app_indices[application_index]
@@ -679,10 +723,44 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 						x = list_x,
 						y = row_y,
 						w = list_width,
-						h = row_height,
+						h = highlight_height,
 					}
+
 					sdl.RenderTexture(renderer, highlight_texture, nil, &selected_rect)
+				} else if application_index == hovered_index {
+					hover_rect := sdl.FRect {
+						x = list_x,
+						y = row_y,
+						w = list_width,
+						h = highlight_height,
+					}
+					sdl.RenderTexture(renderer, hover_texture, nil, &hover_rect)
 				}
+
+				name_color := text_color
+				description_color := subtext_color
+				if application_index == selected_index {
+					name_color = selected_text_color
+					description_color = selected_text_color
+				}
+				assert(
+					ttf.SetTextColor(
+						application_name_texts[source_index],
+						name_color.r,
+						name_color.g,
+						name_color.b,
+						name_color.a,
+					),
+				)
+				assert(
+					ttf.SetTextColor(
+						application_description_texts[source_index],
+						description_color.r,
+						description_color.g,
+						description_color.b,
+						description_color.a,
+					),
+				)
 
 				row_text_x := list_x + 10 * render_scale_x
 				name_width: i32
@@ -768,18 +846,6 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 				window_shown = true
 			}
 		}
-	}
-}
-
-apply_system_theme :: proc() {
-	switch sdl.GetSystemTheme() {
-	case .LIGHT:
-		apply_ui_theme(LIGHT_UI_THEME)
-	case .DARK:
-		apply_ui_theme(DARK_UI_THEME)
-	case .UNKNOWN:
-		// Preserve Vima's original dark palette when the platform has no preference.
-		apply_ui_theme(DARK_UI_THEME)
 	}
 }
 
@@ -892,11 +958,23 @@ rounded_window_border :: proc(
 	return border
 }
 
-rounded_input_surface :: proc(
-	width, height, radius, border_width: i32,
-	background: Color,
+Rounded_Input_Surface :: struct {
+	width:        i32,
+	height:       i32,
+	radius:       i32,
+	border_width: i32,
 	border_color: Color,
-) -> ^sdl.Surface {
+	background:   Color,
+}
+
+rounded_input_surface :: proc(config: Rounded_Input_Surface) -> ^sdl.Surface {
+	width := config.width
+	height := config.height
+	radius := config.radius
+	border_width := config.border_width
+	border_color := config.border_color
+	background := config.background
+
 	surface := sdl.CreateSurface(width, height, .RGBA8888)
 	if surface == nil {
 		return nil
