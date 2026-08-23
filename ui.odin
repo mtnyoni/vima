@@ -32,6 +32,7 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 
 	assert(sdl.Init(sdl.INIT_VIDEO))
 	defer sdl.Quit()
+	apply_system_theme()
 
 	assert(ttf.Init())
 	defer ttf.Quit()
@@ -471,6 +472,11 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 
 			for sdl.PollEvent(&e) {
 				#partial switch e.type {
+				case .SYSTEM_THEME_CHANGED:
+					apply_system_theme()
+					rebuild_ui = true
+					running = false
+
 				case .KEY_DOWN:
 					#partial switch e.key.scancode {
 					case .ESCAPE:
@@ -762,6 +768,18 @@ main_window :: proc(toggle_server: ^Toggle_Server) {
 				window_shown = true
 			}
 		}
+	}
+}
+
+apply_system_theme :: proc() {
+	switch sdl.GetSystemTheme() {
+	case .LIGHT:
+		apply_ui_theme(LIGHT_UI_THEME)
+	case .DARK:
+		apply_ui_theme(DARK_UI_THEME)
+	case .UNKNOWN:
+		// Preserve Vima's original dark palette when the platform has no preference.
+		apply_ui_theme(DARK_UI_THEME)
 	}
 }
 

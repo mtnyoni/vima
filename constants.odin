@@ -19,7 +19,7 @@ LIST_HIGHLIGHT_RADIUS: i32 = 5
 LIST_ICON_SIZE: f32 = 18
 LIST_DESCRIPTION_SIZE_RATIO :: 11.0 / 13.0
 LIST_ROW_HEIGHT_RATIO :: 32.0 / 13.0
-WHEEL_SCROLL_INTERVAL: u64 = 90
+WHEEL_SCROLL_INTERVAL: u64 = 30
 
 CARET_HEIGHT_RATIO: f32 = 0.75
 CARET_BLINK_INTERVAL: u64 = 500
@@ -33,11 +33,57 @@ Color :: struct {
 	a: u8,
 }
 
-app_color: Color = Color{35, 38, 52, 255} // Frappé Crust: #232634
-input_border_color: Color = Color{81, 87, 109, 255} // Frappé Surface 1: #51576d
-window_border_color: Color = Color{98, 104, 128, 255} // Frappé Surface 2: #626880
-text_color: Color = Color{198, 208, 245, 255} // Frappé Text: #c6d0f5
-subtext_color: Color = Color{165, 173, 206, 255} // Frappé Subtext 0: #a5adce
-selected_color: Color = Color{65, 69, 89, 255} // Frappé Surface 0: #414559
-separator_color: Color = Color{41, 44, 60, 255} // Frappé Mantle: #292c3c
-shadow_color: Color = Color{35, 38, 52, 90} // Frappé Crust with soft alpha
+UI_Theme :: struct {
+	app:           Color,
+	input_border:  Color,
+	window_border: Color,
+	text:          Color,
+	subtext:       Color,
+	selected:      Color,
+	separator:     Color,
+	shadow:        Color,
+}
+
+// Catppuccin Frappé
+DARK_UI_THEME :: UI_Theme {
+	app           = {35, 38, 52, 255},
+	input_border  = {81, 87, 109, 255},
+	window_border = {98, 104, 128, 255},
+	text          = {198, 208, 245, 255},
+	subtext       = {165, 173, 206, 255},
+	selected      = {65, 69, 89, 255},
+	separator     = {41, 44, 60, 255},
+	shadow        = {35, 38, 52, 90},
+}
+
+// Catppuccin Latte
+LIGHT_UI_THEME :: UI_Theme {
+	app           = {220, 224, 232, 255},
+	input_border  = {188, 192, 204, 255},
+	window_border = {172, 176, 190, 255},
+	text          = {76, 79, 105, 255},
+	subtext       = {108, 111, 133, 255},
+	selected      = {204, 208, 218, 255},
+	separator     = {230, 233, 239, 255},
+	shadow        = {76, 79, 105, 55},
+}
+
+app_color: Color = DARK_UI_THEME.app
+input_border_color: Color = DARK_UI_THEME.input_border
+window_border_color: Color = DARK_UI_THEME.window_border
+text_color: Color = DARK_UI_THEME.text
+subtext_color: Color = DARK_UI_THEME.subtext
+selected_color: Color = DARK_UI_THEME.selected
+separator_color: Color = DARK_UI_THEME.separator
+shadow_color: Color = DARK_UI_THEME.shadow
+
+apply_ui_theme :: proc(theme: UI_Theme) {
+	app_color = theme.app
+	input_border_color = theme.input_border
+	window_border_color = theme.window_border
+	text_color = theme.text
+	subtext_color = theme.subtext
+	selected_color = theme.selected
+	separator_color = theme.separator
+	shadow_color = theme.shadow
+}
