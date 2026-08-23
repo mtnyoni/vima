@@ -16,7 +16,7 @@ Caret_State :: struct {
 	has_input_activity: bool,
 }
 
-main_window :: proc() {
+main_window :: proc(toggle_server: ^Toggle_Server) {
 	when ODIN_OS == .Linux {
 		// Prefer the native layer-shell backend when the compositor advertises
 		// it. SDL_VIDEO_DRIVER remains available as an explicit override.
@@ -447,6 +447,11 @@ main_window :: proc() {
 		has_focus := false
 		running := true
 		for running {
+			if poll_toggle_signal(toggle_server) {
+				running = false
+				break
+			}
+
 			when ODIN_OS == .Linux {
 				if layer_shell_state != nil {
 					if vima_layer_shell_closed(layer_shell_state) != 0 {

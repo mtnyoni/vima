@@ -18,12 +18,18 @@ main :: proc() {
 
 	lock, acquired := acquire_instance_lock()
 	if !acquired {
-		// Another Vima is already running — signal it (via the socket/IPC
-		// we discussed earlier) and exit immediately, don't build a second UI
-		send_show_signal()
+		// A second shortcut invocation toggles the visible instance off.
+		send_toggle_signal()
 		return
 	}
 	defer release_instance_lock(&lock)
 
-	main_window()
+	toggle_server, listening := start_toggle_server()
+	if !listening {
+		fmt.eprintln("Unable to create the Vima toggle socket")
+		return
+	}
+	defer stop_toggle_server(&toggle_server)
+
+	main_window(&toggle_server)
 }
