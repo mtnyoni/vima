@@ -192,6 +192,7 @@ get_user_apps_dir :: proc(allocator := context.allocator) -> string {
 		}
 		return strings.concatenate({home, "/.local/share/applications"}, allocator)
 	}
+
 	return strings.concatenate({value, "/applications"}, allocator)
 }
 
