@@ -6,6 +6,8 @@ launcher is an overlay instead of a normal application window. It therefore
 does not appear in the taskbar or Alt-Tab list. X11 remains available as a
 utility-window fallback.
 
+![Screenshot](image.png)
+
 ## Fedora requirements
 
 Install the native build and RPM packaging dependencies:
