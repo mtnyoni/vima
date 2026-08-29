@@ -139,9 +139,11 @@ VimaLayerShell *vima_layer_shell_attach(void *display_pointer,
                                        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
                                        ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
   zwlr_layer_surface_v1_set_size(state->surface, 0, 0);
-  zwlr_layer_surface_v1_set_exclusive_zone(state->surface, -1);
+  // Respect areas reserved by panels so taskbar clicks pass through to them.
+  // The remaining workspace stays covered and continues to dismiss on click.
+  zwlr_layer_surface_v1_set_exclusive_zone(state->surface, 0);
   zwlr_layer_surface_v1_set_keyboard_interactivity(
-      state->surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+      state->surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
   wl_surface_commit(surface_pointer);
 
   for (int attempt = 0; attempt < 4 && !state->configured; ++attempt) {
