@@ -40,7 +40,8 @@ get_installed_apps_info :: proc() -> ([dynamic]Installed_App, App_Error) {
 	append(&combined_apps_dir, ..system_apps_dirs[:])
 	delete(system_apps_dirs)
 
-	apps := get_apps_info_from_dirs(combined_apps_dir[:])
+	current_desktop := os.get_env("XDG_CURRENT_DESKTOP", context.temp_allocator)
+	apps := get_apps_info_from_dirs(combined_apps_dir[:], current_desktop)
 	slice.sort_by(apps[:], proc(a: Installed_App, b: Installed_App) -> bool {
 		return a.name < b.name
 	})
@@ -50,9 +51,20 @@ get_installed_apps_info :: proc() -> ([dynamic]Installed_App, App_Error) {
 
 get_apps_info_from_dirs :: proc(
 	apps_dirs: []string,
+	current_desktop: string,
 	allocator := context.allocator,
 ) -> [dynamic]Installed_App {
 	apps := make([dynamic]Installed_App, allocator)
+	seen_desktop_ids := make(map[string]bool, 0, allocator)
+	desktop_id_storage := make([dynamic]string, allocator)
+	defer {
+		delete(seen_desktop_ids)
+		for desktop_id in desktop_id_storage {
+			delete(desktop_id, allocator)
+		}
+		delete(desktop_id_storage)
+	}
+
 	for dir, _ in apps_dirs {
 		files, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 		if err != nil {
@@ -64,31 +76,69 @@ get_apps_info_from_dirs :: proc(
 				continue
 			}
 
-			app := parse_desktop_file(file.fullpath)
-			append(&apps, app)
+			// Earlier XDG data directories take precedence. Hidden entries still
+			// shadow lower-priority copies with the same desktop-file ID.
+			if file.name in seen_desktop_ids {
+				continue
+			}
+
+			desktop_id := strings.clone(file.name, allocator)
+			seen_desktop_ids[desktop_id] = true
+			append(&desktop_id_storage, desktop_id)
+
+			app, visible := parse_desktop_file(file.fullpath, current_desktop, allocator)
+			if visible {
+				append(&apps, app)
+			} else {
+				destroy_installed_app(&app, allocator)
+			}
 		}
 	}
 
 	return apps
 }
 
-parse_desktop_file :: proc(file_path: string, allocator := context.allocator) -> Installed_App {
+parse_desktop_file :: proc(
+	file_path: string,
+	current_desktop: string,
+	allocator := context.allocator,
+) -> (
+	Installed_App,
+	bool,
+) {
 	data, err := os.read_entire_file_from_path(file_path, context.temp_allocator)
 	if err != nil {
-		return Installed_App{}
+		return {}, false
 	}
 
 	content := string(data)
 	lines := strings.split_lines(content, context.temp_allocator)
 
 	app := Installed_App{}
+	in_desktop_entry := false
+	is_application := false
+	hidden := false
+	no_display := false
+	only_show_in := ""
+	not_show_in := ""
 	for raw_line in lines {
 		line := strings.trim(raw_line, " \t\r\n")
 		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
 
-		if strings.contains(line, "[Desktop Entry]") {
+		if line[0] == '[' {
+			if line == "[Desktop Entry]" {
+				in_desktop_entry = true
+				continue
+			}
+			if in_desktop_entry {
+				break
+			}
+			continue
+		}
+
+		if !in_desktop_entry {
 			continue
 		}
 
@@ -101,6 +151,21 @@ parse_desktop_file :: proc(file_path: string, allocator := context.allocator) ->
 		value := strings.trim(line[eq_index + 1:], " \t\r\n")
 
 		switch key {
+		case "Type":
+			is_application = value == "Application"
+
+		case "Hidden":
+			hidden = value == "true"
+
+		case "NoDisplay":
+			no_display = value == "true"
+
+		case "OnlyShowIn":
+			only_show_in = value
+
+		case "NotShowIn":
+			not_show_in = value
+
 		case "Name":
 			if app.name == nil {
 				app.name = strings.clone_to_cstring(value, allocator)
@@ -111,7 +176,7 @@ parse_desktop_file :: proc(file_path: string, allocator := context.allocator) ->
 
 		case "Exec":
 			if app.exec == nil {
-				app.exec = clean_exec_string(value)
+				app.exec = clean_exec_string(value, allocator)
 			}
 
 		case "Icon":
@@ -131,7 +196,34 @@ parse_desktop_file :: proc(file_path: string, allocator := context.allocator) ->
 		}
 	}
 
-	return app
+	visible := is_application && !hidden && !no_display && app.name != nil && app.exec != nil
+	if visible && only_show_in != "" {
+		visible = desktop_list_matches(only_show_in, current_desktop)
+	}
+
+	if visible && not_show_in != "" {
+		visible = !desktop_list_matches(not_show_in, current_desktop)
+	}
+
+	return app, visible
+}
+
+desktop_list_matches :: proc(list: string, current_desktop: string) -> bool {
+	if current_desktop == "" {
+		return false
+	}
+
+	desktops := current_desktop
+	for desktop in strings.split_iterator(&desktops, ":") {
+		entries := list
+		for entry in strings.split_iterator(&entries, ";") {
+			if entry != "" && entry == desktop {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 launch_app :: proc(exec: string) -> bool {
@@ -212,6 +304,7 @@ get_user_apps_dir :: proc(allocator := context.allocator) -> string {
 		if len(home) == 0 {
 			return ""
 		}
+
 		return strings.concatenate({home, "/.local/share/applications"}, allocator)
 	}
 
@@ -232,6 +325,7 @@ get_system_apps_dirs :: proc(allocator := context.allocator) -> []string {
 		if len(dir) == 0 {
 			continue
 		}
+
 		apps_dirs[i] = strings.concatenate({dir, "/applications"}, allocator)
 	}
 
@@ -286,31 +380,31 @@ exec_to_argv :: proc(exec: string) -> []string {
 }
 
 destroy_installed_apps :: proc(apps: [dynamic]Installed_App, allocator := context.allocator) {
-	for app in apps {
-		if app.name != nil {
-			delete(app.name, allocator)
-		}
-
-		if app.search_index != "" {
-			delete(app.search_index, allocator)
-		}
-
-		if app.exec != nil {
-			delete(app.exec, allocator)
-		}
-
-		if app.generic_name != nil {
-			delete(app.generic_name, allocator)
-		}
-
-		if app.icon != nil {
-			delete(app.icon, allocator)
-		}
-
-		if app.description != nil {
-			delete(app.description, allocator)
-		}
+	for &app in apps {
+		destroy_installed_app(&app, allocator)
 	}
 
 	delete(apps)
+}
+
+destroy_installed_app :: proc(app: ^Installed_App, allocator := context.allocator) {
+	if app.name != nil {
+		delete(app.name, allocator)
+	}
+	if app.search_index != "" {
+		delete(app.search_index, allocator)
+	}
+	if app.exec != nil {
+		delete(app.exec, allocator)
+	}
+	if app.generic_name != nil {
+		delete(app.generic_name, allocator)
+	}
+	if app.icon != nil {
+		delete(app.icon, allocator)
+	}
+	if app.description != nil {
+		delete(app.description, allocator)
+	}
+	app^ = {}
 }
