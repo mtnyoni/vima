@@ -3,10 +3,7 @@ package main
 import "core:c"
 
 when ODIN_OS == .Linux {
-	foreign import wayland_client {
-		"system:wayland-client",
-		"build/native/libvima-wayland.a",
-	}
+	foreign import wayland_client {"system:wayland-client", "build/native/libvima-wayland.a"}
 
 	foreign wayland_client {
 		vima_layer_shell_supported :: proc() -> c.int ---

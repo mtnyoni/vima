@@ -145,6 +145,30 @@ launch_app :: proc(exec: string) -> bool {
 		return false
 	}
 
+	when ODIN_OS == .Linux {
+		systemd_command := make([]string, len(argv) + 7)
+		defer delete(systemd_command)
+
+		systemd_command[0] = "systemd-run"
+		systemd_command[1] = "--user"
+		systemd_command[2] = "--collect"
+		systemd_command[3] = "--quiet"
+		systemd_command[4] = "--slice=app.slice"
+		systemd_command[5] = "--property=ExitType=cgroup"
+		systemd_command[6] = "--"
+		copy(systemd_command[7:], argv)
+
+		systemd_state, systemd_stdout, systemd_stderr, systemd_err := os.process_exec(
+			os.Process_Desc{command = systemd_command},
+			context.allocator,
+		)
+		defer delete(systemd_stdout)
+		defer delete(systemd_stderr)
+		if systemd_err == nil && systemd_state.success {
+			return true
+		}
+	}
+
 	desc := os.Process_Desc {
 		command = argv,
 	}
